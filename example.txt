@@ -1,0 +1,15 @@
+var f = func() {
+    var x = 0
+    return func(y) {
+        x += y
+        return x
+    }
+}
+
+var g0 = f()
+var g1 = f()
+
+print g0(5)
+print g1(2)
+print g0(9)
+print g1(3)
