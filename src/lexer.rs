@@ -27,9 +27,6 @@ impl<'src> Lexer<'src> {
             self.pos.column += 1;
         }
     }
-    pub fn is_end(&self) -> bool {
-        self.offset >= self.source.len()
-    }
     fn new_token(&self, offset: usize, pos: Position, ty: TokenType) -> Token<'src> {
         Token { pos, source: &self.source[offset..self.offset], ty }
     }

@@ -352,7 +352,7 @@ impl<'src> Parser<'src> {
             funcs: vec![],
             func_count: 1,
         };
-        while !parser.lexer.is_end() {
+        while parser.token.ty != TokenType::End {
             parser.parse_stmt(&mut func)?;
         }
         func.bytecode.push(Opcode::Finish.into());
