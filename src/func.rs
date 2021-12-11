@@ -1,0 +1,158 @@
+use std::{cell::RefCell, mem::size_of};
+
+use crate::opcode::Opcode;
+
+#[derive(Debug, Clone)]
+pub struct FuncBuilder<'src, 'outer> {
+    pub bytecode: Vec<u8>,
+    pub param_count: u8,
+    scope: Vec<&'src str>,
+    pub closure_scope: RefCell<Vec<ClosureValue>>,
+    outer: Option<&'outer FuncBuilder<'src, 'outer>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Func<'src> {
+    pub bytecode: Vec<u8>,
+    pub param_count: u8,
+    pub scope: Vec<&'src str>,
+    pub closure_scope: Vec<ClosureValue>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ClosureValue {
+    Outer(u8),
+    Stack(u8),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Jump {
+    offset: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct JumpTarget {
+    offset: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Variable {
+    Stack(u8),
+    Closure(u8),
+}
+
+impl<'src, 'outer> FuncBuilder<'src, 'outer> {
+    pub fn new() -> FuncBuilder<'src, 'outer> {
+        FuncBuilder {
+            bytecode: vec![],
+            param_count: 0,
+            scope: vec![],
+            closure_scope: RefCell::new(vec![]),
+            outer: None,
+        }
+    }
+    pub fn new_child(&self) -> FuncBuilder<'src, '_> {
+        FuncBuilder {
+            bytecode: vec![],
+            param_count: 0,
+            scope: vec![""],
+            closure_scope: RefCell::new(vec![]),
+            outer: Some(self),
+        }
+    }
+    pub fn resolve_stack_var(&self, name: &'src str) -> Option<u8> {
+        self.scope.iter()
+            .copied().enumerate().rev()
+            .find(|(_, var_name)| *var_name == name)
+            .map(|(i, _)| i as u8)
+    }
+    pub fn resolve_closure_var(&self, name: &'src str) -> Option<u8> {
+        for i in 0..self.closure_scope.borrow().len() {
+            if self.closure_var_name(i as u8) == name {
+                return Some(i as u8)
+            }
+        }
+        let outer = match self.outer {
+            Some(outer) => outer,
+            None => return None,
+        };
+        let closure_var = if let Some(index) = outer.resolve_stack_var(name) {
+            ClosureValue::Stack(index)
+        } else if let Some(index) = outer.resolve_closure_var(name) {
+            ClosureValue::Outer(index)
+        } else {
+            return None
+        };
+        let index = self.closure_scope.borrow().len();
+        self.closure_scope.borrow_mut().push(closure_var);
+        Some(index as u8)
+    }
+    pub fn closure_var_name(&self, index: u8) -> &'src str {
+        let outer = self.outer.unwrap();
+        match self.closure_scope.borrow()[index as usize] {
+            ClosureValue::Stack(index) => outer.scope[index as usize],
+            ClosureValue::Outer(index) => outer.closure_var_name(index),
+        }
+    }
+    pub fn resolve_var(&mut self, name: &'src str) -> Option<Variable> {
+        if let Some(index) = self.resolve_stack_var(name) {
+            Some(Variable::Stack(index))
+        } else if let Some(index) = self.resolve_closure_var(name) {
+            Some(Variable::Closure(index))
+        } else {
+            None
+        }
+    }
+    pub fn push_var(&mut self, var: Variable) {
+        match var {
+            Variable::Stack(offset) => self.bytecode.extend([Opcode::PushLoad.into(), offset]),
+            Variable::Closure(index) => self.bytecode.extend([Opcode::PushClosureLoad.into(), index]),
+        }
+    }
+    pub fn pop_var(&mut self, var: Variable) {
+        match var {
+            Variable::Stack(offset) => self.bytecode.extend([Opcode::PopStore.into(), offset]),
+            Variable::Closure(index) => self.bytecode.extend([Opcode::PopClosureStore.into(), index]),
+        }
+    }
+    pub fn define_var(&mut self, name: &'src str) {
+        self.scope.push(name);
+    }
+    pub fn define_param(&mut self, name: &'src str) {
+        self.define_var(name);
+        self.param_count += 1;
+    }
+    pub fn stack_size(&self) -> u8 {
+        self.scope.len() as u8
+    }
+    pub fn free_vars(&mut self, n: u8) {
+        self.scope.truncate(self.scope.len() - n as usize);
+        self.bytecode.extend([Opcode::Drop.into(), n]);
+    }
+    pub fn push_jump(&mut self) -> Jump {
+        self.bytecode.push(Opcode::Jump.into());
+        let offset = self.bytecode.len() as u32;
+        self.bytecode.extend(0u32.to_be_bytes());
+        Jump { offset }
+    }
+    pub fn push_jump_if_not(&mut self) -> Jump {
+        self.bytecode.push(Opcode::JumpIfNot.into());
+        let offset = self.bytecode.len() as u32;
+        self.bytecode.extend(0u32.to_be_bytes());
+        Jump { offset }
+    }
+    pub fn create_jump_target(&mut self) -> JumpTarget {
+        JumpTarget { offset: self.bytecode.len() as u32 }
+    }
+    pub fn connect_jump(&mut self, jump: Jump, target: &JumpTarget) {
+        self.bytecode[jump.offset as usize..jump.offset as usize + size_of::<u32>()].copy_from_slice(&target.offset.to_be_bytes());
+    }
+    pub fn build(self) -> Func<'src> {
+        Func {
+            bytecode: self.bytecode,
+            param_count: self.param_count,
+            scope: self.scope,
+            closure_scope: self.closure_scope.take(),
+        }
+    }
+}

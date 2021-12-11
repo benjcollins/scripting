@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::convert::TryInto;
 
-use crate::{heap::{Heap, HeapPtr}, opcode::Opcode, parser::{CompletedFunc, ClosureValue}, list::List};
+use crate::{heap::{Heap, HeapPtr}, opcode::Opcode, list::List, func::{Func, ClosureValue}};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value<'func, 'src> {
@@ -12,13 +12,18 @@ pub enum Value<'func, 'src> {
     Float(f64),
     Bool(bool),
     Closure(HeapPtr<Closure<'func, 'src>>),
-    RustValue(HeapPtr<dyn RustValue>),
+    HeapValue(HeapPtr<HeapValue<'func, 'src>>),
     None,
 }
 
 #[derive(Debug, Clone)]
+pub enum HeapValue<'func, 'src> {
+    List(List<'func, 'src>),
+}
+
+#[derive(Debug, Clone)]
 pub struct Closure<'func, 'src> {
-    func: &'func CompletedFunc<'src>,
+    func: &'func Func<'src>,
     closure_values: Vec<HeapPtr<ClosureValueRef<'func, 'src>>>,
 }
 
@@ -29,7 +34,7 @@ enum ClosureValueRef<'func, 'src> {
 }
 
 pub struct VirtualMachine<'func, 'src> {
-    funcs: &'func [CompletedFunc<'src>],
+    funcs: &'func [Func<'src>],
     call: Call<'func, 'src>,
     stack: Vec<Value<'func, 'src>>,
     call_stack: Vec<Call<'func, 'src>>,
@@ -55,22 +60,6 @@ impl<'func, 'src> PartialEq for Value<'func, 'src> {
             _ => false,
         }
     }
-}
-
-// impl<'func, 'src> Closure<'func, 'src> {
-//     fn new(func: &'func CompletedFunc<'src>, outer: Option<&Closure<'func, 'src>>, frame: usize, heap: &mut Heap) -> Closure<'func, 'src> {
-//         let closure_values = func.closure_scope.iter().map(|val| {
-//             let index = match val {
-//                 ClosureValue::Outer(index) => outer.unwrap().closure_values[*index as usize],
-//                 ClosureValue::Stack(index) => heap.alloc(ClosureValueRef::Stack(frame + *index as usize)),
-//             };
-//         }).collect();
-//         Closure { func, closure_values }
-//     }
-// }
-
-pub trait RustValue where Self: fmt::Debug {
-    fn call(&mut self);
 }
 
 impl<'func, 'src> VirtualMachine<'func, 'src> {
@@ -156,7 +145,7 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
             }
             Opcode::PushFunc => {
                 let func_id = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap());
-                let func = &self.funcs[func_id as usize];
+                let func = &self.funcs[self.funcs.len() - func_id as usize];
                 let closure_values = func.closure_scope.iter().map(|var| match var {
                     ClosureValue::Outer(index) => {
                         self.call.closure.closure_values[*index as usize]
@@ -172,13 +161,12 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
                 self.stack.push(Value::Closure(self.heap.alloc(closure)))
             }
             Opcode::PushList => {
-                todo!();
-            //     let length = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap()) as usize;
-            //     let mut list = List::new(&mut self.heap, length);
-            //     for i in 0..length {
-            //         list[i] = self.stack.pop().unwrap();
-            //     }
-            //     self.stack.push(Value::RustValue(self.heap.alloc(list)))
+                let length = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap()) as usize;
+                let mut list = List::new(&mut self.heap, length);
+                for i in 0..length {
+                    list[i] = self.stack.pop().unwrap();
+                }
+                self.stack.push(Value::HeapValue(self.heap.alloc(HeapValue::List(list))))
             }
             
             Opcode::PopStore => {
@@ -235,7 +223,7 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
         }
         // println!("{}", self.stack.iter().map(|value| format!("{}", value)).collect::<Vec<String>>().join(", "))
     }
-    pub fn run(funcs: &[CompletedFunc], entry_func: &CompletedFunc) {
+    pub fn run(funcs: &[Func], entry_func: &Func) {
         let mut heap = Heap::new();
 
         let mut closure_ref_map = HashMap::new();
@@ -276,10 +264,10 @@ impl<'func, 'src> fmt::Display for Value<'func, 'src> {
             Value::Float(float) => write!(f, "{}", float),
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::None => write!(f, "none"),
-            Value::RustValue(_) => write!(f, "rust value"),
             Value::Closure(closure) => {
                 write!(f, "fn({})", closure.func.scope[1..closure.func.param_count as usize + 1].join(", "))
             }
+            Value::HeapValue(value) => todo!(),
         }
     }
 }

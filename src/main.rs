@@ -12,6 +12,7 @@ mod opcode;
 mod vm;
 mod heap;
 mod list;
+mod func;
 
 fn repl() {
     print!(">>> ");

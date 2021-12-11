@@ -1,8 +1,8 @@
 use std::ops::{Index, IndexMut};
 
-use crate::{heap::{HeapSlice, Heap}, vm::{Value, RustValue}};
+use crate::{heap::{HeapSlice, Heap}, vm::Value};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct List<'func, 'src> {
     slice: HeapSlice<Value<'func, 'src>>,
 }
@@ -10,12 +10,6 @@ pub struct List<'func, 'src> {
 impl<'func, 'src> List<'func, 'src> {
     pub fn new(heap: &mut Heap, length: usize) -> List<'func, 'src> {
         List { slice: heap.alloc_slice(length) }
-    }
-}
-
-impl<'func, 'src> RustValue for List<'func, 'src> {
-    fn call(&mut self) {
-        todo!()
     }
 }
 

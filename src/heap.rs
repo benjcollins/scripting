@@ -1,4 +1,4 @@
-use std::{alloc::{Layout, alloc, dealloc}, fmt, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut, Index, IndexMut}, ptr::NonNull};
+use std::{alloc::{Layout, alloc, dealloc}, fmt, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut, Index, IndexMut}, ptr::NonNull, slice};
 
 pub struct Heap {
     base: *mut u8,
@@ -98,6 +98,12 @@ impl<T> HeapSlice<T> {
     pub fn len(&self) -> usize {
         self.length
     }
+    pub fn iter(&self) -> HeapSliceIter<T> {
+        HeapSliceIter { slice: self, index: 0 }
+    }
+    // pub fn iter_mut(&self) -> HeapSliceIterMut<T> {
+
+    // }
 }
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for HeapPtr<T> {
@@ -118,3 +124,39 @@ impl<T: fmt::Debug> fmt::Debug for HeapSlice<T> {
         write!(f, "]")
     }
 }
+
+pub struct HeapSliceIter<'slice, T> {
+    slice: &'slice HeapSlice<T>,
+    index: usize,
+}
+
+impl<'slice, T> Iterator for HeapSliceIter<'slice, T> {
+    type Item = &'slice T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.slice.len() {
+            self.index += 1;
+            Some(&self.slice[self.index - 1])
+        } else {
+            None
+        }
+    }
+}
+
+pub struct HeapSliceIterMut<'slice, T> {
+    slice: &'slice mut HeapSlice<T>,
+    index: usize,
+}
+
+// impl<'slice, T> Iterator for HeapSliceIterMut<'slice, T> {
+//     type Item = &'slice mut T;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         if self.index < self.slice.len() {
+//             self.index += 1;
+//             Some(&mut self.slice[self.index - 1])
+//         } else {
+//             None
+//         }
+//     }
+// }
