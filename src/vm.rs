@@ -62,6 +62,28 @@ impl<'func, 'src> PartialEq for Value<'func, 'src> {
     }
 }
 
+impl<'func, 'src> Closure<'func, 'src> {
+    fn new(
+        func: &'func Func<'src>,
+        closure: Option<&Closure<'func, 'src>>,
+        frame: usize, heap: &mut Heap,
+        closure_ref_map: &mut HashMap<usize, Vec<HeapPtr<ClosureValueRef<'func, 'src>>>>
+    ) -> Closure<'func, 'src> {
+        let closure_values = func.closure_scope.iter().map(|var| match var {
+            ClosureValue::Outer(index) => {
+                closure.unwrap().closure_values[*index as usize]
+            }
+            ClosureValue::Stack(rel_index) => {
+                let index = frame + *rel_index as usize;
+                let closure_ref = heap.alloc(ClosureValueRef::Stack(index));
+                closure_ref_map.entry(index).or_insert(vec![]).push(closure_ref);
+                closure_ref
+            }
+        }).collect();
+        Closure { func, closure_values }
+    }
+}
+
 impl<'func, 'src> VirtualMachine<'func, 'src> {
     fn arithmetic_op(&mut self, int: fn(i64, i64) -> i64, float: fn(f64, f64) -> f64) {
         let c = match (self.stack.pop().unwrap(), self.stack.pop().unwrap()) {
@@ -145,19 +167,13 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
             }
             Opcode::PushFunc => {
                 let func_id = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap());
-                let func = &self.funcs[self.funcs.len() - func_id as usize];
-                let closure_values = func.closure_scope.iter().map(|var| match var {
-                    ClosureValue::Outer(index) => {
-                        self.call.closure.closure_values[*index as usize]
-                    },
-                    ClosureValue::Stack(rel_index) => {
-                        let index = self.call.frame + *rel_index as usize;
-                        let closure_ref = self.heap.alloc(ClosureValueRef::Stack(index));
-                        self.closure_ref_map.entry(index).or_insert(vec![]).push(closure_ref);
-                        closure_ref
-                    }
-                }).collect();
-                let closure = Closure { func, closure_values };
+                let closure = Closure::new(
+                    &self.funcs[self.funcs.len() - func_id as usize],
+                    Some(&self.call.closure),
+                    self.call.frame,
+                    &mut self.heap,
+                    &mut self.closure_ref_map
+                );
                 self.stack.push(Value::Closure(self.heap.alloc(closure)))
             }
             Opcode::PushList => {
@@ -227,21 +243,13 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
         let mut heap = Heap::new();
 
         let mut closure_ref_map = HashMap::new();
-        
-        let closure_values = entry_func.closure_scope.iter().map(|var| match var {
-            ClosureValue::Outer(_) => panic!(),
-            ClosureValue::Stack(index) => {
-                let closure_ref = heap.alloc(ClosureValueRef::Stack(*index as usize));
-                closure_ref_map.entry(*index as usize).or_insert(vec![]).push(closure_ref);
-                closure_ref
-            }
-        }).collect();
+        let closure = Closure::new(entry_func, None, 0, &mut heap, &mut closure_ref_map);
 
         let mut vm = VirtualMachine {
             funcs,
             call: Call {
                 frame: 0,
-                closure: heap.alloc(Closure { func: entry_func, closure_values }),
+                closure: heap.alloc(closure),
                 pc: 0,
             },
             stack: vec![],
