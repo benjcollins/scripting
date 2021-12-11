@@ -1,4 +1,4 @@
-use std::{alloc::{Layout, alloc, dealloc}, fmt, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut, Index, IndexMut}, ptr::NonNull, slice};
+use std::{alloc::{Layout, alloc, dealloc}, fmt, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut, Index, IndexMut}, ptr::NonNull};
 
 pub struct Heap {
     base: *mut u8,
