@@ -3,8 +3,6 @@ use std::{fs, io::{stdin, stdout, Write}};
 use parser::Parser;
 use vm::VirtualMachine;
 
-use opcode::Bytecode;
-
 mod lexer;
 mod token;
 mod parser;
@@ -24,7 +22,7 @@ fn repl() {
             Ok(funcs) => {
                 for (i, func) in funcs.iter().enumerate() {
                     println!("func{}", i);
-                    println!("{}\n", Bytecode::new(&func.bytecode))
+                    println!("{}\n", func)
                 }
                 VirtualMachine::run(&funcs, funcs.last().unwrap());
                 source.clear();
@@ -44,7 +42,7 @@ fn main() {
     let funcs = Parser::parse(&source).unwrap();
     for (i, func) in funcs.iter().enumerate() {
         println!("func{} - {:?}", i, func.closure_scope);
-        println!("{}", Bytecode::new(&func.bytecode))
+        println!("{}", func)
     }
     VirtualMachine::run(&funcs, funcs.last().unwrap());
 

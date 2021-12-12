@@ -1,4 +1,4 @@
-use std::{cell::RefCell, mem::size_of};
+use std::{cell::RefCell, mem::size_of, fmt::Display, convert::TryInto};
 
 use crate::opcode::Opcode;
 
@@ -55,7 +55,7 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
         FuncBuilder {
             bytecode: vec![],
             param_count: 0,
-            scope: vec![""],
+            scope: vec!["return"],
             closure_scope: RefCell::new(vec![]),
             outer: Some(self),
         }
@@ -154,5 +154,48 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             scope: self.scope,
             closure_scope: self.closure_scope.take(),
         }
+    }
+}
+
+struct Reader<'bytecode> {
+    bytecode: &'bytecode [u8],
+    offset: usize,
+}
+
+impl<'bytecode> Reader<'bytecode> {
+    fn take_bytes(&mut self, n: usize) -> &'bytecode [u8] {
+        let bytes = &self.bytecode[self.offset..self.offset + n];
+        self.offset += n;
+        bytes
+    }
+}
+
+impl<'src> Display for Func<'src> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut reader = Reader { bytecode: &self.bytecode, offset: 0 };
+
+        while reader.offset < self.bytecode.len() {
+            write!(f, "{:>5} : ", reader.offset)?;
+            let opcode: Opcode = reader.take_bytes(1)[0].try_into().unwrap();
+            write!(f, "{:?} ", opcode)?;
+
+            match opcode {
+                Opcode::Add | Opcode::Subtract | Opcode::Multiply | Opcode::Divide | Opcode::Modulus |
+                Opcode::Equal | Opcode::NotEqual | Opcode::Less | Opcode::Greater | Opcode::LessOrEqual | Opcode::GreaterOrEqual |
+                Opcode::PushTrue | Opcode::PushFalse | Opcode::PushNone | Opcode::PopPrint |
+                Opcode::Return | Opcode::Finish => writeln!(f, ""),
+
+                Opcode::PushInt => writeln!(f, "{}", i64::from_be_bytes(reader.take_bytes(size_of::<i64>()).try_into().unwrap())),
+                Opcode::PushLoad | Opcode::PopStore => {
+                    writeln!(f, "'{}'", self.scope[reader.take_bytes(1)[0] as usize])
+                }
+                Opcode::PushClosureLoad | Opcode::PopClosureStore |
+                Opcode::Drop | Opcode::Call => writeln!(f, "{}", reader.take_bytes(1)[0]),
+                Opcode::Jump | Opcode::JumpIfNot | Opcode::PushList => writeln!(f, "{}", u32::from_be_bytes(reader.take_bytes(size_of::<u32>()).try_into().unwrap())),
+                Opcode::PushFunc => writeln!(f, "func{}", u32::from_be_bytes(reader.take_bytes(size_of::<u32>()).try_into().unwrap())),
+            }?;
+        }
+
+        Ok(())
     }
 }
