@@ -75,6 +75,8 @@ impl<'src> Lexer<'src> {
                         "func" => TokenType::Func,
                         "return" => TokenType::Return,
 
+                        "list" => TokenType::List,
+
                         "print" => TokenType::Print,
                         _ => TokenType::Ident,
                     };

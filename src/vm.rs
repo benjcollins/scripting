@@ -1,6 +1,7 @@
 use core::fmt;
 use core::cmp::Ordering;
-use std::collections::HashMap;
+use std::fmt::Display;
+use std::{collections::HashMap, fmt::Debug};
 use std::mem::size_of;
 use std::convert::TryInto;
 
@@ -12,14 +13,11 @@ pub enum Value<'func, 'src> {
     Float(f64),
     Bool(bool),
     Closure(HeapPtr<Closure<'func, 'src>>),
-    HeapValue(HeapPtr<HeapValue<'func, 'src>>),
+    RustValue(HeapPtr<dyn RustValue + 'func>),
     None,
 }
 
-#[derive(Debug, Clone)]
-pub enum HeapValue<'func, 'src> {
-    List(List<'func, 'src>),
-}
+pub trait RustValue where Self: Debug + Display {}
 
 #[derive(Debug, Clone)]
 pub struct Closure<'func, 'src> {
@@ -178,13 +176,9 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
             }
             Opcode::PushList => {
                 let length = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap()) as usize;
-                let mut list = List::new(&mut self.heap, length);
-                for i in 0..length {
-                    list[i] = self.stack.pop().unwrap();
-                }
-                self.stack.push(Value::HeapValue(self.heap.alloc(HeapValue::List(list))))
+                let list = List::new(&mut self.heap, length, &mut self.stack);
+                self.stack.push(Value::RustValue(self.heap.alloc(list)))
             }
-            
             Opcode::PopStore => {
                 let index = self.take_bytes(1)[0];
                 self.stack[self.call.frame + index as usize] = self.stack.pop().unwrap()
@@ -275,7 +269,7 @@ impl<'func, 'src> fmt::Display for Value<'func, 'src> {
             Value::Closure(closure) => {
                 write!(f, "fn({})", closure.func.scope[1..closure.func.param_count as usize + 1].join(", "))
             }
-            Value::HeapValue(value) => todo!(),
+            Value::RustValue(value) => write!(f, "{}", &**value),
         }
     }
 }

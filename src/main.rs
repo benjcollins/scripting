@@ -1,3 +1,6 @@
+#![feature(unsize)]
+#![feature(coerce_unsized)]
+
 use std::{fs, io::{stdin, stdout, Write}};
 
 use parser::Parser;

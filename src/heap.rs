@@ -1,4 +1,4 @@
-use std::{alloc::{Layout, alloc, dealloc}, fmt, marker::PhantomData, mem::size_of, ops::{Deref, DerefMut, Index, IndexMut}, ptr::NonNull};
+use std::{alloc::{Layout, alloc, dealloc}, fmt, marker::{PhantomData, Unsize}, mem::size_of, ops::{Deref, DerefMut, Index, IndexMut, CoerceUnsized}, ptr::NonNull};
 
 pub struct Heap {
     base: *mut u8,
@@ -39,6 +39,8 @@ impl Heap {
         HeapSlice { ptr, length }
     }
 }
+
+impl<T: ?Sized + Unsize<U>, U: ?Sized> CoerceUnsized<HeapPtr<U>> for HeapPtr<T> {}
 
 impl<T: ?Sized> Clone for HeapPtr<T> {
     fn clone(&self) -> Self {
@@ -99,11 +101,11 @@ impl<T> HeapSlice<T> {
         self.length
     }
     pub fn iter(&self) -> HeapSliceIter<T> {
-        HeapSliceIter { slice: self, index: 0 }
+        HeapSliceIter { ptr: self.ptr, index: 0, length: self.length, phantom: PhantomData }
     }
-    // pub fn iter_mut(&self) -> HeapSliceIterMut<T> {
-
-    // }
+    pub fn iter_mut(&self) -> HeapSliceIterMut<T> {
+        HeapSliceIterMut { ptr: self.ptr, start: 0, end: self.length, phantom: PhantomData }
+    }
 }
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for HeapPtr<T> {
@@ -126,17 +128,19 @@ impl<T: fmt::Debug> fmt::Debug for HeapSlice<T> {
 }
 
 pub struct HeapSliceIter<'slice, T> {
-    slice: &'slice HeapSlice<T>,
+    ptr: *const T,
     index: usize,
+    length: usize,
+    phantom: PhantomData<&'slice T>
 }
 
 impl<'slice, T> Iterator for HeapSliceIter<'slice, T> {
     type Item = &'slice T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.slice.len() {
+        if self.index < self.length {
             self.index += 1;
-            Some(&self.slice[self.index - 1])
+            unsafe { Some(&*self.ptr.add(self.index - 1)) }
         } else {
             None
         }
@@ -144,19 +148,32 @@ impl<'slice, T> Iterator for HeapSliceIter<'slice, T> {
 }
 
 pub struct HeapSliceIterMut<'slice, T> {
-    slice: &'slice mut HeapSlice<T>,
-    index: usize,
+    ptr: *mut T,
+    start: usize,
+    end: usize,
+    phantom: PhantomData<&'slice T>
 }
 
-// impl<'slice, T> Iterator for HeapSliceIterMut<'slice, T> {
-//     type Item = &'slice mut T;
+impl<'slice, T> Iterator for HeapSliceIterMut<'slice, T> {
+    type Item = &'slice mut T;
 
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.index < self.slice.len() {
-//             self.index += 1;
-//             Some(&mut self.slice[self.index - 1])
-//         } else {
-//             None
-//         }
-//     }
-// }
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start < self.end {
+            self.start += 1;
+            unsafe { Some(&mut *self.ptr.add(self.start - 1)) }
+        } else {
+            None
+        }
+    }
+}
+
+impl<'slice, T> DoubleEndedIterator for HeapSliceIterMut<'slice, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.start < self.end {
+            self.end -= 1;
+            unsafe { Some(&mut *self.ptr.add(self.end)) }
+        } else {
+            None
+        }
+    }
+}

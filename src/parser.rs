@@ -133,10 +133,13 @@ impl<'src> Parser<'src> {
                     self.invalid_token()?;
                 }
             }
-            TokenType::OpenSquareBrace => {
+            TokenType::List => {
                 self.next();
+                if !self.eat(TokenType::OpenBrace) {
+                    self.invalid_token()?;
+                }
                 let mut length: u32 = 0;
-                if !self.eat(TokenType::CloseSquareBrace) {
+                if !self.eat(TokenType::CloseBrace) {
                     loop {
                         self.parse_expr(func)?;
                         length += 1;
@@ -144,7 +147,7 @@ impl<'src> Parser<'src> {
                             break
                         }
                     }
-                    if !self.eat(TokenType::CloseSquareBrace) {
+                    if !self.eat(TokenType::CloseBrace) {
                         self.invalid_token()?;
                     }
                 }

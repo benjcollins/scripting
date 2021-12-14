@@ -55,6 +55,8 @@ pub enum TokenType {
     Return,
     Print,
 
+    List,
+
     End,
     Invalid,
 }
