@@ -115,6 +115,7 @@ impl<'src> Lexer<'src> {
                 ']' => return self.single_char_token(TokenType::CloseSquareBrace),
                 ';' => return self.single_char_token(TokenType::SemiColon),
                 ',' => return self.single_char_token(TokenType::Comma),
+                '.' => return self.single_char_token(TokenType::Dot),
 
                 '+' => return self.double_char_token_if('=', TokenType::Plus, TokenType::PlusEquals),
                 '-' => return self.double_char_token_if('=', TokenType::Minus, TokenType::MinusEquals),
