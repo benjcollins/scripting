@@ -5,9 +5,9 @@ use crate::opcode::Opcode;
 #[derive(Debug, Clone)]
 pub struct FuncBuilder<'src, 'outer> {
     pub bytecode: Vec<u8>,
-    pub param_count: u8,
+    param_count: u8,
+    closure_scope: RefCell<Vec<ClosureValue>>,
     scope: Vec<&'src str>,
-    pub closure_scope: RefCell<Vec<ClosureValue>>,
     outer: Option<&'outer FuncBuilder<'src, 'outer>>,
 }
 
@@ -190,6 +190,7 @@ impl<'src> Display for Func<'src> {
                     writeln!(f, "'{}'", self.scope[reader.take_bytes(1)[0] as usize])
                 }
                 Opcode::PushClosureLoad | Opcode::PopClosureStore |
+                Opcode::PushPropLoad | Opcode::PopPropStore |
                 Opcode::Drop | Opcode::Call => writeln!(f, "{}", reader.take_bytes(1)[0]),
                 Opcode::Jump | Opcode::JumpIfNot | Opcode::PushList => writeln!(f, "{}", u32::from_be_bytes(reader.take_bytes(size_of::<u32>()).try_into().unwrap())),
                 Opcode::PushFunc => writeln!(f, "func{}", u32::from_be_bytes(reader.take_bytes(size_of::<u32>()).try_into().unwrap())),

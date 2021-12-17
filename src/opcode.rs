@@ -24,9 +24,11 @@ pub enum Opcode {
     PushLoad,
     PushClosureLoad,
     PushList,
+    PushPropLoad,
 
     PopStore,
     PopPrint,
+    PopPropStore,
     PopClosureStore,
 
     Jump,

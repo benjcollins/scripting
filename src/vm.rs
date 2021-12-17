@@ -13,11 +13,13 @@ pub enum Value<'func, 'src> {
     Float(f64),
     Bool(bool),
     Closure(HeapPtr<Closure<'func, 'src>>),
-    RustValue(HeapPtr<dyn RustValue + 'func>),
+    RustValue(HeapPtr<dyn RustValue<'func, 'src> + 'func>),
     None,
 }
 
-pub trait RustValue where Self: Debug + Display {}
+pub trait RustValue<'func, 'src> where Self: Debug + Display {
+    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine<'func, 'src>) -> Value<'func, 'src>;
+}
 
 #[derive(Debug, Clone)]
 pub struct Closure<'func, 'src> {
@@ -39,6 +41,7 @@ pub struct VirtualMachine<'func, 'src> {
     heap: Heap,
     finished: bool,
     closure_ref_map: HashMap<usize, Vec<HeapPtr<ClosureValueRef<'func, 'src>>>>,
+    pub props: &'func [&'src str],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -163,6 +166,16 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
                     ClosureValueRef::Heap(ptr) => *ptr,
                 });
             }
+            Opcode::PushPropLoad => {
+                let index = self.take_bytes(1)[0];
+                match self.stack.pop().unwrap() {
+                    Value::RustValue(mut value) => {
+                        let prop = value.get_property(index, self);
+                        self.stack.push(prop);
+                    }
+                    _ => panic!(),
+                }
+            }
             Opcode::PushFunc => {
                 let func_id = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap());
                 let closure = Closure::new(
@@ -190,6 +203,9 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
                     ClosureValueRef::Stack(index) => self.stack[index] = val,
                     ClosureValueRef::Heap(mut ptr) => *ptr = val,
                 }
+            }
+            Opcode::PopPropStore => {
+                todo!()
             }
             Opcode::PopPrint => println!("{}", self.stack.pop().unwrap()),
             Opcode::Jump => self.call.pc = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap()) as usize,
@@ -233,7 +249,7 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
         }
         // println!("{}", self.stack.iter().map(|value| format!("{}", value)).collect::<Vec<String>>().join(", "))
     }
-    pub fn run(funcs: &[Func], entry_func: &Func) {
+    pub fn run(funcs: &[Func], entry_func: &Func, props: &[&'src str]) {
         let mut heap = Heap::new();
 
         let mut closure_ref_map = HashMap::new();
@@ -251,6 +267,7 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
             closure_ref_map,
             finished: false,
             heap,
+            props,
         };
 
         while !vm.finished {

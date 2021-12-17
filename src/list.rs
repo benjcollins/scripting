@@ -1,6 +1,6 @@
-use std::fmt::Display;
+use std::fmt;
 
-use crate::{heap::{HeapSlice, Heap}, vm::{Value, RustValue}};
+use crate::{heap::{HeapSlice, Heap}, vm::{Value, RustValue, VirtualMachine}};
 
 #[derive(Debug, Clone)]
 pub struct List<'func, 'src> {
@@ -17,11 +17,16 @@ impl<'func, 'src> List<'func, 'src> {
     }
 }
 
-impl<'func, 'src> RustValue for List<'func, 'src> {
-
+impl<'func, 'src> RustValue<'func, 'src> for List<'func, 'src> {
+    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine<'func, 'src>) -> Value<'func, 'src> {
+        match vm.props[index as usize] {
+            "len" => Value::Int(self.slice.len() as i64),
+            _ => panic!()
+        }
+    }
 }
 
-impl<'func, 'src> Display for List<'func, 'src> {
+impl<'func, 'src> fmt::Display for List<'func, 'src> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
         let mut iter = self.slice.iter();

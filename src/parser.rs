@@ -5,6 +5,7 @@ pub struct Parser<'src> {
     token: Token<'src>,
     func_count: u32,
     funcs: Vec<Func<'src>>,
+    props: Vec<&'src str>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
@@ -101,11 +102,26 @@ impl<'src> Parser<'src> {
             TokenType::Ident => {
                 let name = self.token.source;
                 self.next();
-                if self.token.ty == TokenType::OpenBrace {
-                    self.parse_call(func, name)?;
-                } else {
-                    let var = func.resolve_var(name).unwrap();
-                    func.push_var(var);
+                match self.token.ty {
+                    TokenType::OpenBrace => {
+                        self.parse_call(func, name)?;
+                    }
+                    TokenType::Dot => {
+                        self.next();
+                        let var = func.resolve_var(name).unwrap();
+                        func.push_var(var);
+                        let prop = self.token.source;
+                        if !self.eat(TokenType::Ident) {
+                            self.invalid_token()?;
+                        }
+                        let index = self.props.len();
+                        self.props.push(prop);
+                        func.bytecode.extend([Opcode::PushPropLoad.into(), index as u8])
+                    }
+                    _ => {
+                        let var = func.resolve_var(name).unwrap();
+                        func.push_var(var);
+                    }
                 }
             }
             TokenType::Int => {
@@ -345,7 +361,7 @@ impl<'src> Parser<'src> {
         }
         Ok(())
     }
-    pub fn parse(source: &'src str) -> Result<Vec<Func>, MissingInput> {
+    pub fn parse(source: &'src str) -> Result<(Vec<Func>, Vec<&'src str>), MissingInput> {
         let mut lexer = Lexer::new(source);
         let token = lexer.next_token();
         let mut func = FuncBuilder::new();
@@ -354,12 +370,13 @@ impl<'src> Parser<'src> {
             lexer,
             funcs: vec![],
             func_count: 1,
+            props: vec![],
         };
         while parser.token.ty != TokenType::End {
             parser.parse_stmt(&mut func)?;
         }
         func.bytecode.push(Opcode::Finish.into());
         parser.funcs.push(func.build());
-        Ok(parser.funcs)
+        Ok((parser.funcs, parser.props))
     }
 }

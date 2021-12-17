@@ -1,0 +1,22 @@
+var person = fn(name, age) {
+    var methods = object(
+        canDrink = func(self) self.age >= 18,
+    )
+    return record(name, age, methods)
+}
+
+var growUp = fn(years) fn(person) {
+    person.age += years
+    return person
+}
+
+var people = list(
+    person("Ben", 19),
+    person("Matthew", 17),
+    person("Emma", 15),
+)
+
+people.iter()
+    .map(growUp(2))
+    .filter(fn(person) person.canDrink())
+    .reduce(minBy(fn(person) person.age))
