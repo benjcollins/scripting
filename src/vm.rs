@@ -1,6 +1,5 @@
 use core::fmt;
 use core::cmp::Ordering;
-use std::fmt::Display;
 use std::{collections::HashMap, fmt::Debug};
 use std::mem::size_of;
 use std::convert::TryInto;
@@ -8,50 +7,50 @@ use std::convert::TryInto;
 use crate::{heap::{Heap, HeapPtr}, opcode::Opcode, list::List, func::{Func, ClosureValue}};
 
 #[derive(Debug, Clone, Copy)]
-pub enum Value<'func, 'src> {
+pub enum Value<'a> {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Closure(HeapPtr<Closure<'func, 'src>>),
-    RustValue(HeapPtr<dyn RustValue<'func, 'src> + 'func>),
+    Closure(HeapPtr<Closure<'a>>),
+    RustValue(HeapPtr<dyn RustValue<'a> + 'a>),
     None,
 }
 
-pub trait RustValue<'func, 'src> where Self: Debug + Display {
-    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine<'func, 'src>) -> Value<'func, 'src>;
+pub trait RustValue<'a> where Self: fmt::Debug + fmt::Display {
+    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine<'a>) -> Value<'a>;
 }
 
 #[derive(Debug, Clone)]
-pub struct Closure<'func, 'src> {
-    func: &'func Func<'src>,
-    closure_values: Vec<HeapPtr<ClosureValueRef<'func, 'src>>>,
+pub struct Closure<'a> {
+    func: &'a Func<'a>,
+    closure_values: Vec<HeapPtr<ClosureValueRef<'a>>>,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ClosureValueRef<'func, 'src> {
+enum ClosureValueRef<'a> {
     Stack(usize),
-    Heap(HeapPtr<Value<'func, 'src>>),
+    Heap(HeapPtr<Value<'a>>),
 }
 
-pub struct VirtualMachine<'func, 'src> {
-    funcs: &'func [Func<'src>],
-    call: Call<'func, 'src>,
-    stack: Vec<Value<'func, 'src>>,
-    call_stack: Vec<Call<'func, 'src>>,
+pub struct VirtualMachine<'a> {
+    funcs: &'a [Func<'a>],
+    call: Call<'a>,
+    stack: Vec<Value<'a>>,
+    call_stack: Vec<Call<'a>>,
     heap: Heap,
     finished: bool,
-    closure_ref_map: HashMap<usize, Vec<HeapPtr<ClosureValueRef<'func, 'src>>>>,
-    pub props: &'func [&'src str],
+    closure_ref_map: HashMap<usize, Vec<HeapPtr<ClosureValueRef<'a>>>>,
+    pub props: &'a [&'a str],
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Call<'func, 'src> {
+struct Call<'a> {
     pc: usize,
     frame: usize,
-    closure: HeapPtr<Closure<'func, 'src>>,
+    closure: HeapPtr<Closure<'a>>,
 }
 
-impl<'func, 'src> PartialEq for Value<'func, 'src> {
+impl<'a> PartialEq for Value<'a> {
     fn eq(&self, other: &Value) -> bool {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => a == b,
@@ -63,13 +62,14 @@ impl<'func, 'src> PartialEq for Value<'func, 'src> {
     }
 }
 
-impl<'func, 'src> Closure<'func, 'src> {
+impl<'a> Closure<'a> {
     fn new(
-        func: &'func Func<'src>,
-        closure: Option<&Closure<'func, 'src>>,
-        frame: usize, heap: &mut Heap,
-        closure_ref_map: &mut HashMap<usize, Vec<HeapPtr<ClosureValueRef<'func, 'src>>>>
-    ) -> Closure<'func, 'src> {
+        func: &'a Func<'a>,
+        closure: Option<&Closure<'a>>,
+        frame: usize,
+        heap: &mut Heap,
+        closure_ref_map: &mut HashMap<usize, Vec<HeapPtr<ClosureValueRef<'a>>>>
+    ) -> Closure<'a> {
         let closure_values = func.closure_scope.iter().map(|var| match var {
             ClosureValue::Outer(index) => {
                 closure.unwrap().closure_values[*index as usize]
@@ -85,7 +85,7 @@ impl<'func, 'src> Closure<'func, 'src> {
     }
 }
 
-impl<'func, 'src> VirtualMachine<'func, 'src> {
+impl<'a> VirtualMachine<'a> {
     fn arithmetic_op(&mut self, int: fn(i64, i64) -> i64, float: fn(f64, f64) -> f64) {
         let c = match (self.stack.pop().unwrap(), self.stack.pop().unwrap()) {
             (Value::Int(a), Value::Int(b)) => Value::Int(int(b, a)),
@@ -247,9 +247,8 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
             }
             Opcode::Finish => self.finished = true,
         }
-        // println!("{}", self.stack.iter().map(|value| format!("{}", value)).collect::<Vec<String>>().join(", "))
     }
-    pub fn run(funcs: &[Func], entry_func: &Func, props: &[&'src str]) {
+    pub fn run(funcs: &[Func], entry_func: &Func, props: &[&str]) {
         let mut heap = Heap::new();
 
         let mut closure_ref_map = HashMap::new();
@@ -276,7 +275,7 @@ impl<'func, 'src> VirtualMachine<'func, 'src> {
     }
 }
 
-impl<'func, 'src> fmt::Display for Value<'func, 'src> {
+impl<'a> fmt::Display for Value<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(int) => write!(f, "{}", int),

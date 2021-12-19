@@ -4,7 +4,7 @@ use crate::opcode::Opcode;
 
 #[derive(Debug, Clone)]
 pub struct FuncBuilder<'src, 'outer> {
-    pub bytecode: Vec<u8>,
+    bytecode: Vec<u8>,
     param_count: u8,
     closure_scope: RefCell<Vec<ClosureValue>>,
     scope: Vec<&'src str>,
@@ -59,6 +59,9 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             closure_scope: RefCell::new(vec![]),
             outer: Some(self),
         }
+    }
+    pub fn push_bytes(&mut self, bytes: &[u8]) {
+        self.bytecode.extend(bytes)
     }
     pub fn resolve_stack_var(&self, name: &'src str) -> Option<u8> {
         self.scope.iter()

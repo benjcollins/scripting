@@ -78,7 +78,7 @@ impl<'src> Parser<'src> {
     }
     fn parse_call(&mut self, func: &mut FuncBuilder<'src, '_>, name: &'src str) -> Result<(), MissingInput> {
         self.next();
-        func.bytecode.push(Opcode::PushNone.into());
+        func.push_bytes(&[Opcode::PushNone.into()]);
         let mut arg_count = 0;
         if !self.eat(TokenType::CloseBrace) {
             loop {
@@ -94,7 +94,7 @@ impl<'src> Parser<'src> {
         }
         let var = func.resolve_var(name).unwrap();
         func.push_var(var);
-        func.bytecode.extend([Opcode::Call.into(), arg_count]);
+        func.push_bytes(&[Opcode::Call.into(), arg_count]);
         Ok(())
     }
     fn parse_value(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), MissingInput> {
@@ -114,9 +114,15 @@ impl<'src> Parser<'src> {
                         if !self.eat(TokenType::Ident) {
                             self.invalid_token()?;
                         }
-                        let index = self.props.len();
-                        self.props.push(prop);
-                        func.bytecode.extend([Opcode::PushPropLoad.into(), index as u8])
+                        let index = match self.props.iter().copied().enumerate().find(|(_, name)| *name == prop) {
+                            Some((index, _)) => index,
+                            None => {
+                                let index = self.props.len();
+                                self.props.push(prop);
+                                index
+                            }
+                        };
+                        func.push_bytes(&[Opcode::PushPropLoad.into(), index as u8])
                     }
                     _ => {
                         let var = func.resolve_var(name).unwrap();
@@ -127,20 +133,20 @@ impl<'src> Parser<'src> {
             TokenType::Int => {
                 let c: i64 = self.token.source.parse().unwrap();
                 self.next();
-                func.bytecode.push(Opcode::PushInt.into());
-                func.bytecode.extend(c.to_be_bytes());
+                func.push_bytes(&[Opcode::PushInt.into()]);
+                func.push_bytes(&c.to_be_bytes());
             }
             TokenType::True => {
                 self.next();
-                func.bytecode.push(Opcode::PushTrue.into());
+                func.push_bytes(&[Opcode::PushTrue.into()]);
             }
             TokenType::False => {
                 self.next();
-                func.bytecode.push(Opcode::PushFalse.into());
+                func.push_bytes(&[Opcode::PushFalse.into()]);
             }
             TokenType::None => {
                 self.next();
-                func.bytecode.push(Opcode::PushNone.into());
+                func.push_bytes(&[Opcode::PushNone.into()]);
             }
             TokenType::OpenBrace => {
                 self.next();
@@ -167,14 +173,14 @@ impl<'src> Parser<'src> {
                         self.invalid_token()?;
                     }
                 }
-                func.bytecode.push(Opcode::PushList.into());
-                func.bytecode.extend(length.to_be_bytes());
+                func.push_bytes(&[Opcode::PushList.into()]);
+                func.push_bytes(&length.to_be_bytes());
             }
             TokenType::Func => {
                 self.next();
-                func.bytecode.push(Opcode::PushFunc.into());
+                func.push_bytes(&[Opcode::PushFunc.into()]);
                 self.func_count += 1;
-                func.bytecode.extend((self.func_count as u32).to_be_bytes());
+                func.push_bytes(&(self.func_count as u32).to_be_bytes());
 
                 let mut child_func = func.new_child();
 
@@ -201,9 +207,9 @@ impl<'src> Parser<'src> {
                     self.parse_block(&mut child_func)?;
                 } else {
                     self.parse_expr(&mut child_func)?;
-                    child_func.bytecode.extend([Opcode::PopStore.into(), 0]);
+                    child_func.push_bytes(&[Opcode::PopStore.into(), 0]);
                 }
-                child_func.bytecode.push(Opcode::Return.into());
+                child_func.push_bytes(&[Opcode::Return.into()]);
                 self.funcs.push(child_func.build());
             }
             _ => self.invalid_token()?,
@@ -231,7 +237,7 @@ impl<'src> Parser<'src> {
                     self.next();
                     self.parse_value(func)?;
                     self.parse_infix(func, prec)?;
-                    func.bytecode.push(opcode.into());
+                    func.push_bytes(&[opcode.into()]);
                 }
                 ParsedInfixOp::Incomplete { .. } => break,
             }
@@ -248,7 +254,7 @@ impl<'src> Parser<'src> {
         self.parse_expr(func)?;
         let var = func.resolve_var(name).unwrap();
         func.push_var(var);
-        func.bytecode.push(opcode.into());
+        func.push_bytes(&[opcode.into()]);
         func.pop_var(var);
         Ok(())
     }
@@ -314,12 +320,12 @@ impl<'src> Parser<'src> {
             TokenType::Print => {
                 self.next();
                 self.parse_expr(func)?;
-                func.bytecode.push(Opcode::PopPrint.into());
+                func.push_bytes(&[Opcode::PopPrint.into()]);
             }
             TokenType::Return => {
                 self.next();
                 self.parse_expr(func)?;
-                func.bytecode.extend([Opcode::PopStore.into(), 0]);
+                func.push_bytes(&[Opcode::PopStore.into(), 0]);
             }
             TokenType::Ident => {
                 let name = self.token.source;
@@ -327,7 +333,7 @@ impl<'src> Parser<'src> {
                 match self.token.ty {
                     TokenType::OpenBrace => {
                         self.parse_call(func, name)?;
-                        func.bytecode.extend([Opcode::Drop.into(), 1])
+                        func.push_bytes(&[Opcode::Drop.into(), 1])
                     }
                     TokenType::Equals => {
                         self.next();
@@ -375,7 +381,7 @@ impl<'src> Parser<'src> {
         while parser.token.ty != TokenType::End {
             parser.parse_stmt(&mut func)?;
         }
-        func.bytecode.push(Opcode::Finish.into());
+        func.push_bytes(&[Opcode::Finish.into()]);
         parser.funcs.push(func.build());
         Ok((parser.funcs, parser.props))
     }

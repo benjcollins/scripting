@@ -48,6 +48,4 @@ fn main() {
         println!("{}", func)
     }
     VirtualMachine::run(&funcs, funcs.last().unwrap(), &props);
-
-    // repl()
 }
