@@ -1,4 +1,4 @@
-use crate::token::{Position, Token, TokenType};
+use crate::token::{Position, Token, TokenKind};
 
 pub struct Lexer<'src> {
     source: &'src str,
@@ -27,122 +27,111 @@ impl<'src> Lexer<'src> {
             self.pos.column += 1;
         }
     }
-    fn new_token(&self, offset: usize, pos: Position, ty: TokenType) -> Token<'src> {
-        Token { pos, source: &self.source[offset..self.offset], ty }
-    }
-    fn single_char_token(&mut self, ty: TokenType) -> Token<'src> {
-        let pos = self.pos;
-        let offset = self.offset;
+    fn single_char_token(&mut self, token: TokenKind<'src>) -> TokenKind<'src> {
         self.next_char();
-        self.new_token(offset, pos, ty)
+        token
     }
-    fn double_char_token_if(&mut self, ch: char, single: TokenType, double: TokenType) -> Token<'src> {
-        let pos = self.pos;
-        let offset = self.offset;
+    fn double_char_token_if(&mut self, ch: char, single: TokenKind<'src>, double: TokenKind<'src>) -> TokenKind<'src> {
         self.next_char();
         if self.peek_char().map_or(false, |ch1| ch == ch1) {
-            self.next();
-            self.new_token(offset, pos, double)
+            self.next_token();
+            double
         } else {
-            self.new_token(offset, pos, single)
+            single
         }
     }
     pub fn next_token(&mut self) -> Token<'src> {
-        loop {
-            let offset = self.offset;
-            let pos = self.pos;
+        let mut pos;
+        let kind = loop {
+            pos = self.pos;
 
             let ch = match self.peek_char() {
                 Some(ch) => ch,
-                None => return self.new_token(offset, pos, TokenType::End),
+                None => break TokenKind::End,
             };
 
             match ch {
                 ch if ch.is_alphabetic() => {
+                    let start = self.offset;
                     while self.peek_char().map_or(false, char::is_alphanumeric) {
                         self.next_char();
                     }
-                    let source = &self.source[offset..self.offset];
-                    let ty = match source {
-                        "true" => TokenType::True,
-                        "false" => TokenType::False,
-                        "none" => TokenType::None,
+                    break match &self.source[start..self.offset] {
+                        "true" => TokenKind::True,
+                        "false" => TokenKind::False,
+                        "none" => TokenKind::None,
 
-                        "var" => TokenType::Var,
-                        "while" => TokenType::While,
-                        "if" => TokenType::If,
-                        "else" => TokenType::Else,
-                        "func" => TokenType::Func,
-                        "return" => TokenType::Return,
+                        "var" => TokenKind::Var,
+                        "while" => TokenKind::While,
+                        "if" => TokenKind::If,
+                        "else" => TokenKind::Else,
+                        "func" => TokenKind::Func,
+                        "return" => TokenKind::Return,
 
-                        "list" => TokenType::List,
+                        "list" => TokenKind::List,
 
-                        "print" => TokenType::Print,
-                        _ => TokenType::Ident,
-                    };
-                    return self.new_token(offset, pos, ty);
+                        "print" => TokenKind::Print,
+
+                        name => TokenKind::Ident(name),
+                    }
                 }
                 ch if ch.is_numeric() => {
+                    let start = self.offset;
                     while self.peek_char().map_or(false, char::is_numeric) {
                         self.next_char();
                     }
-                    return self.new_token(offset, pos, TokenType::Int)
+                    break TokenKind::Int(self.source[start..self.offset].parse().unwrap())
                 }
                 ch if ch.is_whitespace() => {
                     while self.peek_char().map_or(false, char::is_whitespace) {
                         self.next_char();
                     }
-                    continue
                 }
-
                 '"' => {
                     self.next_char();
+                    let start = self.offset;
                     while self.peek_char().map_or(false, |ch| ch != '"') {
                         self.next_char();
                     }
-                    if self.peek_char() == None {
-                        return self.new_token(offset, pos, TokenType::Invalid)
-                    } else {
-                        return self.new_token(offset, pos, TokenType::String)
+                    break match self.peek_char() {
+                        Some(_) => {
+                            let str = &self.source[start..self.offset];
+                            self.next_char();
+                            TokenKind::String(str)
+                        }
+                        None => TokenKind::Invalid
                     }
                 }
 
-                '(' => return self.single_char_token(TokenType::OpenBrace),
-                ')' => return self.single_char_token(TokenType::CloseBrace),
-                '{' => return self.single_char_token(TokenType::OpenCurlyBrace),
-                '}' => return self.single_char_token(TokenType::CloseCurlyBrace),
-                '[' => return self.single_char_token(TokenType::OpenSquareBrace),
-                ']' => return self.single_char_token(TokenType::CloseSquareBrace),
-                ';' => return self.single_char_token(TokenType::SemiColon),
-                ',' => return self.single_char_token(TokenType::Comma),
-                '.' => return self.single_char_token(TokenType::Dot),
+                '(' => break self.single_char_token(TokenKind::OpenBrace),
+                ')' => break self.single_char_token(TokenKind::CloseBrace),
+                '{' => break self.single_char_token(TokenKind::OpenCurlyBrace),
+                '}' => break self.single_char_token(TokenKind::CloseCurlyBrace),
+                '[' => break self.single_char_token(TokenKind::OpenSquareBrace),
+                ']' => break self.single_char_token(TokenKind::CloseSquareBrace),
+                ';' => break self.single_char_token(TokenKind::SemiColon),
+                ',' => break self.single_char_token(TokenKind::Comma),
+                '.' => break self.single_char_token(TokenKind::Dot),
 
-                '+' => return self.double_char_token_if('=', TokenType::Plus, TokenType::PlusEquals),
-                '-' => return self.double_char_token_if('=', TokenType::Minus, TokenType::MinusEquals),
-                '*' => return self.double_char_token_if('=', TokenType::Multiply, TokenType::MultiplyEquals),
-                '/' => return self.double_char_token_if('=', TokenType::Divide, TokenType::DivideEquals),
-                '%' => return self.double_char_token_if('=', TokenType::Modulus, TokenType::ModulusEquals),
+                '+' => break self.double_char_token_if('=', TokenKind::Plus, TokenKind::PlusEquals),
+                '-' => break self.double_char_token_if('=', TokenKind::Minus, TokenKind::MinusEquals),
+                '*' => break self.double_char_token_if('=', TokenKind::Multiply, TokenKind::MultiplyEquals),
+                '/' => break self.double_char_token_if('=', TokenKind::Divide, TokenKind::DivideEquals),
+                '%' => break self.double_char_token_if('=', TokenKind::Modulus, TokenKind::ModulusEquals),
 
-                '!' => return self.double_char_token_if('=', TokenType::Not, TokenType::NotEqual),
-                '=' => return self.double_char_token_if('=', TokenType::Equals, TokenType::DoubleEquals),
-                '<' => return self.double_char_token_if('=', TokenType::Less, TokenType::LessOrEqual),
-                '>' => return self.double_char_token_if('=', TokenType::Greater, TokenType::GreaterOrEqual),
-                '&' => return self.double_char_token_if('&', TokenType::Invalid, TokenType::And),
-                '|' => return self.double_char_token_if('|', TokenType::Invalid, TokenType::Or),
+                '!' => break self.double_char_token_if('=', TokenKind::Not, TokenKind::NotEqual),
+                '=' => break self.double_char_token_if('=', TokenKind::Equals, TokenKind::DoubleEquals),
+                '<' => break self.double_char_token_if('=', TokenKind::Less, TokenKind::LessOrEqual),
+                '>' => break self.double_char_token_if('=', TokenKind::Greater, TokenKind::GreaterOrEqual),
+                '&' => break self.double_char_token_if('&', TokenKind::Invalid, TokenKind::And),
+                '|' => break self.double_char_token_if('|', TokenKind::Invalid, TokenKind::Or),
                 
                 _ => {
                     self.next_char();
-                    return self.new_token(offset, pos, TokenType::Invalid)
+                    break TokenKind::Invalid
                 },
             }
-        }
-    }
-}
-
-impl<'src> Iterator for Lexer<'src> {
-    type Item = Token<'src>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        Some(self.next_token())
+        };
+        Token { kind, pos }
     }
 }

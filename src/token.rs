@@ -1,15 +1,15 @@
 #[derive(Debug, Clone, Copy)]
 pub struct Token<'src> {
-    pub source: &'src str,
     pub pos: Position,
-    pub ty: TokenType,
+    pub kind: TokenKind<'src>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TokenType {
-    Ident,
-    Int,
-    String,
+pub enum TokenKind<'src> {
+    Ident(&'src str),
+    Int(u64),
+    Float(f32),
+    String(&'src str),
     
     Plus,
     Minus,
