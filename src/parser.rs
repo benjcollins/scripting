@@ -90,6 +90,11 @@ impl<'src> Parser<'src> {
                 func.push_bytes(&[Opcode::PushInt.into()]);
                 func.push_bytes(&val.to_be_bytes());
             }
+            TokenKind::Float(val) => {
+                self.next();
+                func.push_bytes(&[Opcode::PushFloat.into()]);
+                func.push_bytes(&val.to_be_bytes());
+            }
             TokenKind::True => {
                 self.next();
                 func.push_bytes(&[Opcode::PushTrue.into()]);

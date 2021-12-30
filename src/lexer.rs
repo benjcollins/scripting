@@ -80,7 +80,15 @@ impl<'src> Lexer<'src> {
                     while self.peek_char().map_or(false, char::is_numeric) {
                         self.next_char();
                     }
-                    break TokenKind::Int(self.source[start..self.offset].parse().unwrap())
+                    break if self.peek_char() == Some('.') {
+                        self.next_char();
+                        while self.peek_char().map_or(false, char::is_numeric) {
+                            self.next_char()
+                        }
+                        TokenKind::Float(self.source[start..self.offset].parse().unwrap())
+                    } else {
+                        TokenKind::Int(self.source[start..self.offset].parse().unwrap())
+                    }
                 }
                 ch if ch.is_whitespace() => {
                     while self.peek_char().map_or(false, char::is_whitespace) {

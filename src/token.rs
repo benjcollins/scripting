@@ -8,7 +8,7 @@ pub struct Token<'src> {
 pub enum TokenKind<'src> {
     Ident(&'src str),
     Int(u64),
-    Float(f32),
+    Float(f64),
     String(&'src str),
     
     Plus,

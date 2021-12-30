@@ -152,6 +152,10 @@ impl<'a> VirtualMachine<'a> {
                 let bytes = self.take_bytes(size_of::<i64>()).try_into().unwrap();
                 self.stack.push(Value::Int(i64::from_be_bytes(bytes)));
             }
+            Opcode::PushFloat => {
+                let bytes = self.take_bytes(size_of::<f64>()).try_into().unwrap();
+                self.stack.push(Value::Float(f64::from_be_bytes(bytes)));
+            }
             Opcode::PushTrue => self.stack.push(Value::Bool(true)),
             Opcode::PushFalse => self.stack.push(Value::Bool(false)),
             Opcode::PushNone => self.stack.push(Value::None),

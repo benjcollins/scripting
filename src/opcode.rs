@@ -17,6 +17,7 @@ pub enum Opcode {
     GreaterOrEqual,
 
     PushInt,
+    PushFloat,
     PushTrue,
     PushFalse,
     PushNone,

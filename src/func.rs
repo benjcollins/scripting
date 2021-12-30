@@ -189,6 +189,7 @@ impl<'src> Display for Func<'src> {
                 Opcode::Return | Opcode::Finish => writeln!(f, ""),
 
                 Opcode::PushInt => writeln!(f, "{}", i64::from_be_bytes(reader.take_bytes(size_of::<i64>()).try_into().unwrap())),
+                Opcode::PushFloat => writeln!(f, "{}", f64::from_be_bytes(reader.take_bytes(size_of::<f64>()).try_into().unwrap())),
                 Opcode::PushLoad | Opcode::PopStore => {
                     writeln!(f, "'{}'", self.scope[reader.take_bytes(1)[0] as usize])
                 }
