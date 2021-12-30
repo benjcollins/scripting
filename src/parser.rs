@@ -97,6 +97,26 @@ impl<'src> Parser<'src> {
         func.push_bytes(&[Opcode::Call.into(), arg_count]);
         Ok(())
     }
+    fn parse_property(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), MissingInput> {
+        self.next();
+        let prop = self.token.source;
+        if !self.eat(TokenType::Ident) {
+            self.invalid_token()?;
+        }
+        let index = match self.props.iter().copied().enumerate().find(|(_, name)| *name == prop) {
+            Some((index, _)) => index,
+            None => {
+                let index = self.props.len();
+                self.props.push(prop);
+                index
+            }
+        };
+        func.push_bytes(&[Opcode::PushPropLoad.into(), index as u8]);
+        if self.eat(TokenType::Dot) {
+            self.parse_property(func)?;
+        }
+        Ok(())
+    }
     fn parse_value(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), MissingInput> {
         match self.token.ty {
             TokenType::Ident => {
@@ -107,22 +127,9 @@ impl<'src> Parser<'src> {
                         self.parse_call(func, name)?;
                     }
                     TokenType::Dot => {
-                        self.next();
                         let var = func.resolve_var(name).unwrap();
                         func.push_var(var);
-                        let prop = self.token.source;
-                        if !self.eat(TokenType::Ident) {
-                            self.invalid_token()?;
-                        }
-                        let index = match self.props.iter().copied().enumerate().find(|(_, name)| *name == prop) {
-                            Some((index, _)) => index,
-                            None => {
-                                let index = self.props.len();
-                                self.props.push(prop);
-                                index
-                            }
-                        };
-                        func.push_bytes(&[Opcode::PushPropLoad.into(), index as u8])
+                        self.parse_property(func)?;
                     }
                     _ => {
                         let var = func.resolve_var(name).unwrap();
