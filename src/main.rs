@@ -6,7 +6,7 @@ use std::{fs, io::{stdin, stdout, Write}};
 use parser::Parser;
 use vm::VirtualMachine;
 
-use crate::parser::ParseError;
+use crate::{parser::ParseError, func::FuncSrc};
 
 mod lexer;
 mod token;
@@ -21,11 +21,17 @@ fn repl() {
     print!(">>> ");
     stdout().flush().unwrap();
     let mut source = String::new();
+    let mut funcs = vec![];
+    let mut symbols = vec![];
+    let mut last_scope = vec![];
+    let mut stack = vec![];
     loop {
         stdin().read_line(&mut source).unwrap();
-        match Parser::parse(&source, None) {
-            Ok((funcs, props)) => {
-                VirtualMachine::run(&funcs, funcs.last().unwrap(), &props);
+        let entry_func = funcs.len();
+        match Parser::parse(&source, None, &mut funcs, &mut symbols, last_scope.clone()) {
+            Ok(final_scope) => {
+                VirtualMachine::run(&funcs, entry_func, &symbols, &mut stack);
+                last_scope = final_scope;
                 source.clear();
                 print!(">>> ");
             }
@@ -44,8 +50,10 @@ fn repl() {
 
 fn run_file(path: &str, disassemble: bool) {
     let source = fs::read_to_string(path).unwrap();
-    let (funcs, props) = match Parser::parse(&source, Some(path)) {
-        Ok(x) => x,
+    let mut funcs = vec![];
+    let mut symbols = vec![];
+    match Parser::parse(&source, Some(path), &mut funcs, &mut symbols, vec![]) {
+        Ok(_) => (),
         Err(ParseError::EndOfInput) => {
             println!("unexpected end of input");
             return
@@ -58,10 +66,11 @@ fn run_file(path: &str, disassemble: bool) {
     if disassemble {
         for (i, func) in funcs.iter().enumerate() {
             println!("func{} - {:?}", i, func.closure_scope);
-            println!("{}", func)
+            println!("{}", FuncSrc::new(func, &symbols))
         }
     }
-    VirtualMachine::run(&funcs, funcs.last().unwrap(), &props);
+    let mut stack = vec![];
+    VirtualMachine::run(&funcs, funcs.len() - 1, &symbols, &mut stack);
 }
 
 fn main() {

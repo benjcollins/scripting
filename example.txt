@@ -1,1 +1,9 @@
-print 5 + 2
+var fac = func(n) {
+    if n == 1 {
+        return 1
+    } else {
+        return n * fac(n - 1)
+    }
+}
+
+print fac(6)

@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, Copy)]
 pub struct Token<'src> {
-    pub pos: Position,
+    pub offset: usize,
     pub kind: TokenKind<'src>,
 }
 
@@ -62,8 +62,24 @@ pub enum TokenKind<'src> {
     Invalid,
 }
 
-#[derive(Debug, Clone, Copy)]
 pub struct Position {
     pub line: u32,
     pub column: u32,
+}
+
+pub fn pos_at_offset(source: &str, offset: usize) -> Position {
+    let mut line = 1;
+    let mut column = 1;
+    for (i, ch) in source.char_indices() {
+        if i == offset {
+            return Position { line, column }
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    unreachable!()
 }

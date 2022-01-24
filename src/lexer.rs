@@ -1,14 +1,13 @@
-use crate::token::{Position, Token, TokenKind};
+use crate::token::{Token, TokenKind};
 
 pub struct Lexer<'src> {
     source: &'src str,
-    pos: Position,
     offset: usize,
 }
 
 impl<'src> Lexer<'src> {
     pub fn new(source: &'src str) -> Lexer {
-        Lexer { source, pos: Position { line: 1, column: 1 }, offset: 0 }
+        Lexer { source, offset: 0 }
     }
     fn peek_char(&self) -> Option<char> {
         self.source[self.offset..].chars().next()
@@ -20,12 +19,6 @@ impl<'src> Lexer<'src> {
             None => return
         };
         self.offset += ch.len_utf8();
-        if ch == '\n' {
-            self.pos.line += 1;
-            self.pos.column = 1;
-        } else {
-            self.pos.column += 1;
-        }
     }
     fn single_char_token(&mut self, token: TokenKind<'src>) -> TokenKind<'src> {
         self.next_char();
@@ -41,9 +34,9 @@ impl<'src> Lexer<'src> {
         }
     }
     pub fn next_token(&mut self) -> Token<'src> {
-        let mut pos;
+        let mut offset;
         let kind = loop {
-            pos = self.pos;
+            offset = self.offset;
 
             let ch = match self.peek_char() {
                 Some(ch) => ch,
@@ -140,6 +133,6 @@ impl<'src> Lexer<'src> {
                 },
             }
         };
-        Token { kind, pos }
+        Token { kind, offset }
     }
 }

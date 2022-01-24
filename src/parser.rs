@@ -1,15 +1,19 @@
 use core::fmt;
 
-use crate::{lexer::Lexer, opcode::Opcode, token::{Token, TokenKind, Position}, func::{Func, FuncBuilder}};
+use crate::{lexer::Lexer, opcode::Opcode, token::{Token, TokenKind, pos_at_offset}, func::{Func, FuncBuilder}};
 
-pub struct Parser<'src> {
-    source: &'src str,
-    path: Option<&'src str>,
-    lexer: Lexer<'src>,
-    token: Token<'src>,
-    func_count: u32,
-    funcs: Vec<Func<'src>>,
-    props: Vec<&'src str>,
+pub struct Parser<'a> {
+    source: &'a str,
+    path: Option<&'a str>,
+    lexer: Lexer<'a>,
+    token: Token<'a>,
+    funcs: &'a mut Vec<Func>,
+    symbols: &'a mut Vec<String>,
+}
+
+pub struct Program {
+    funcs: Vec<Func>,
+    symbols: Vec<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
@@ -31,28 +35,32 @@ pub enum ParseError<'src> {
 pub struct InvalidInput<'src> {
     source: &'src str,
     path: Option<&'src str>,
-    pos: Position,
+    offset: usize,
 }
 
 impl<'src> fmt::Display for InvalidInput<'src> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pos = pos_at_offset(self.source, self.offset);
         match self.path {
-            Some(path) => writeln!(f, "syntax error at {}:{}:{}", path, self.pos.line, self.pos.column),
-            None => writeln!(f, "syntax error at {}:{}", self.pos.line, self.pos.column),
+            Some(path) => writeln!(f, "syntax error at {}:{}:{}", path, pos.line, pos.column),
+            None => writeln!(f, "syntax error at {}:{}", pos.line, pos.column),
         }?;
-        writeln!(f, "'{}'", self.source.lines().nth(self.pos.line as usize - 1).unwrap())?;
-        for _ in 0..self.pos.column {
+        writeln!(f, "'{}'", self.source.lines().nth(pos.line as usize - 1).unwrap())?;
+        for _ in 0..pos.column {
             write!(f, " ")?;
         }
         write!(f, "^")
     }
 }
 
-impl<'src> Parser<'src> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Symbol(pub u32);
+
+impl<'a> Parser<'a> {
     fn next_token(&mut self) {
         self.token = self.lexer.next_token();
     }
-    fn eat_token(&mut self, kind: TokenKind<'src>) -> bool {
+    fn eat_token(&mut self, kind: TokenKind<'a>) -> bool {
         if self.token.kind == kind {
             self.next_token();
             true
@@ -60,24 +68,7 @@ impl<'src> Parser<'src> {
             false
         }
     }
-    fn expect_token(&mut self, kind: TokenKind<'src>) -> Result<(), ParseError<'src>> {
-        if self.eat_token(kind) {
-            Ok(())
-        } else {
-            Err(self.parse_error())
-        }
-    }
-    fn parse_error(&mut self) -> ParseError<'src> {
-        match self.token.kind {
-            TokenKind::End => ParseError::EndOfInput,
-            _ => ParseError::InvalidInput(InvalidInput {
-                path: self.path,
-                source: self.source,
-                pos: self.token.pos,
-            })
-        }
-    }
-    fn eat_ident(&mut self) -> Result<&'src str, ParseError<'src>> {
+    fn expect_ident(&mut self) -> Result<&'a str, ParseError<'a>> {
         match self.token.kind {
             TokenKind::Ident(name) => {
                 self.next_token();
@@ -86,7 +77,24 @@ impl<'src> Parser<'src> {
             _ => Err(self.parse_error()),
         }
     }
-    fn parse_call(&mut self, func: &mut FuncBuilder<'src, '_>, name: &'src str) -> Result<(), ParseError<'src>> {
+    fn expect_token(&mut self, kind: TokenKind<'a>) -> Result<(), ParseError<'a>> {
+        if self.eat_token(kind) {
+            Ok(())
+        } else {
+            Err(self.parse_error())
+        }
+    }
+    fn parse_error(&mut self) -> ParseError<'a> {
+        match self.token.kind {
+            TokenKind::End => ParseError::EndOfInput,
+            _ => ParseError::InvalidInput(InvalidInput {
+                path: self.path,
+                source: self.source,
+                offset: self.token.offset,
+            })
+        }
+    }
+    fn parse_call(&mut self, func: &mut FuncBuilder<'a, '_>, symbol: Symbol) -> Result<(), ParseError<'a>> {
         self.next_token();
         func.push_bytes(&[Opcode::PushNone.into()]);
         let mut arg_count = 0;
@@ -100,21 +108,32 @@ impl<'src> Parser<'src> {
             }
             self.expect_token(TokenKind::CloseBrace)?;
         }
-        let var = func.resolve_var(name).unwrap();
+        let var = func.resolve_var(symbol).unwrap();
         func.push_var(var);
         func.push_bytes(&[Opcode::Call.into(), arg_count]);
         Ok(())
     }
-    fn parse_value(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), ParseError<'src>> {
+    fn add_symbol(&mut self, name: &'a str) -> Symbol {
+        match self.symbols.iter().position(|symbol| *symbol == name) {
+            Some(id) => Symbol(id as u32),
+            None => {
+                let id = self.symbols.len();
+                self.symbols.push(name.to_string());
+                Symbol(id as u32)
+            }
+        }
+    }
+    fn parse_value(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         match self.token.kind {
             TokenKind::Ident(name) => {
                 self.next_token();
+                let symbol = self.add_symbol(name);
                 match self.token.kind {
                     TokenKind::OpenBrace => {
-                        self.parse_call(func, name)?;
+                        self.parse_call(func, symbol)?;
                     }
                     _ => {
-                        let var = func.resolve_var(name).unwrap();
+                        let var = func.resolve_var(symbol).unwrap();
                         func.push_var(var);
                     }
                 }
@@ -165,17 +184,19 @@ impl<'src> Parser<'src> {
             }
             TokenKind::Func => {
                 self.next_token();
+                let func_index = self.funcs.len();
+                self.funcs.push(Func::default());
                 func.push_bytes(&[Opcode::PushFunc.into()]);
-                self.func_count += 1;
-                func.push_bytes(&(self.func_count as u32).to_be_bytes());
+                func.push_bytes(&(func_index as u32).to_be_bytes());
 
                 let mut child_func = func.new_child();
 
                 self.expect_token(TokenKind::OpenBrace)?;
                 if !self.eat_token(TokenKind::CloseBrace) {
                     loop {
-                        let name = self.eat_ident()?;
-                        child_func.define_param(name);
+                        let name = self.expect_ident()?;
+                        let symbol = self.add_symbol(name);
+                        child_func.define_param(symbol);
                         if !self.eat_token(TokenKind::Comma) {
                             break
                         }
@@ -190,37 +211,30 @@ impl<'src> Parser<'src> {
                     child_func.push_bytes(&[Opcode::PopStore.into(), 0]);
                 }
                 child_func.push_bytes(&[Opcode::Return.into()]);
-                self.funcs.push(child_func.build());
+                self.funcs[func_index] = child_func.build();
             }
             _ => return Err(self.parse_error()),
         };
         Ok(())
     }
-    fn parse_property(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), ParseError<'src>> {
+    fn parse_property(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         self.next_token();
-        let prop = self.eat_ident()?;
-        let index = match self.props.iter().copied().enumerate().find(|(_, name)| *name == prop) {
-            Some((index, _)) => index,
-            None => {
-                let index = self.props.len();
-                self.props.push(prop);
-                index
-            }
-        };
-        func.push_bytes(&[Opcode::PushPropLoad.into(), index as u8]);
+        let name = self.expect_ident()?;
+        let symbol = self.add_symbol(name);
+        func.push_bytes(&[Opcode::PushPropLoad.into(), symbol.0 as u8]);
         if self.eat_token(TokenKind::Dot) {
             self.parse_property(func)?;
         }
         Ok(())
     }
-    fn parse_infix_op(&mut self, func: &mut FuncBuilder<'src, '_>, prec: Precedence, op: Opcode) -> Result<(), ParseError<'src>> {
+    fn parse_infix_op(&mut self, func: &mut FuncBuilder<'a, '_>, prec: Precedence, op: Opcode) -> Result<(), ParseError<'a>> {
         self.next_token();
         self.parse_value(func)?;
         self.parse_infix(func, prec)?;
         func.push_bytes(&[op.into()]);
         Ok(())
     }
-    fn parse_infix(&mut self, func: &mut FuncBuilder<'src, '_>, prec: Precedence) -> Result<(), ParseError<'src>> {
+    fn parse_infix(&mut self, func: &mut FuncBuilder<'a, '_>, prec: Precedence) -> Result<(), ParseError<'a>> {
         loop {
             match self.token.kind {
                 TokenKind::Dot => self.parse_property(func)?,
@@ -243,21 +257,21 @@ impl<'src> Parser<'src> {
         }
         Ok(())
     }
-    fn parse_expr(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), ParseError<'src>> {
+    fn parse_expr(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         self.parse_value(func)?;
         self.parse_infix(func, Precedence::Top)?;
         Ok(())
     }
-    fn parse_assign_op(&mut self, func: &mut FuncBuilder<'src, '_>, name: &'src str, opcode: Opcode) -> Result<(), ParseError<'src>> {
+    fn parse_assign_op(&mut self, func: &mut FuncBuilder<'a, '_>, symbol: Symbol, opcode: Opcode) -> Result<(), ParseError<'a>> {
         self.next_token();
         self.parse_expr(func)?;
-        let var = func.resolve_var(name).unwrap();
+        let var = func.resolve_var(symbol).unwrap();
         func.push_var(var);
         func.push_bytes(&[opcode.into()]);
         func.pop_var(var);
         Ok(())
     }
-    fn parse_if(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), ParseError<'src>> {
+    fn parse_if(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         self.next_token();
         self.parse_expr(func)?;
         let cond = func.push_jump_if_not();
@@ -279,7 +293,7 @@ impl<'src> Parser<'src> {
         }
         Ok(())
     }
-    fn parse_stmt(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), ParseError<'src>> {
+    fn parse_stmt(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         match self.token.kind {
             TokenKind::While => {
                 self.next_token();
@@ -295,15 +309,17 @@ impl<'src> Parser<'src> {
             TokenKind::If => self.parse_if(func)?,
             TokenKind::Var => {
                 self.next_token();
-                let name = self.eat_ident()?;
-                func.define_var(name);
+                let name = self.expect_ident()?;
+                let symbol = self.add_symbol(name);
+                func.define_var(symbol);
                 self.expect_token(TokenKind::Equals)?;
                 if let TokenKind::Ident(name) = self.token.kind {
+                    let symbol = self.add_symbol(name);
                     self.next_token();
                     if self.token.kind == TokenKind::OpenBrace {
-                        self.parse_call(func, name)?;
+                        self.parse_call(func, symbol)?;
                     } else {
-                        let var = func.resolve_var(name).unwrap();
+                        let var = func.resolve_var(symbol).unwrap();
                         func.push_var(var);
                         self.parse_infix(func, Precedence::Top)?;
                     }
@@ -320,25 +336,27 @@ impl<'src> Parser<'src> {
                 self.next_token();
                 self.parse_expr(func)?;
                 func.push_bytes(&[Opcode::PopStore.into(), 0]);
+                func.push_bytes(&[Opcode::Return.into()]);
             }
             TokenKind::Ident(name) => {
                 self.next_token();
+                let symbol = self.add_symbol(name);
                 match self.token.kind {
                     TokenKind::OpenBrace => {
-                        self.parse_call(func, name)?;
+                        self.parse_call(func, symbol)?;
                         func.push_bytes(&[Opcode::Drop.into(), 1])
                     }
                     TokenKind::Equals => {
                         self.next_token();
                         self.parse_expr(func)?;
-                        let var = func.resolve_var(name).unwrap();
+                        let var = func.resolve_var(symbol).unwrap();
                         func.pop_var(var);
                     }
-                    TokenKind::PlusEquals => self.parse_assign_op(func, name, Opcode::Add.into())?,
-                    TokenKind::MinusEquals => self.parse_assign_op(func, name, Opcode::Subtract.into())?,
-                    TokenKind::MultiplyEquals => self.parse_assign_op(func, name, Opcode::Multiply.into())?,
-                    TokenKind::DivideEquals => self.parse_assign_op(func, name, Opcode::Divide.into())?,
-                    TokenKind::ModulusEquals => self.parse_assign_op(func, name, Opcode::Modulus.into())?,
+                    TokenKind::PlusEquals => self.parse_assign_op(func, symbol, Opcode::Add.into())?,
+                    TokenKind::MinusEquals => self.parse_assign_op(func, symbol, Opcode::Subtract.into())?,
+                    TokenKind::MultiplyEquals => self.parse_assign_op(func, symbol, Opcode::Multiply.into())?,
+                    TokenKind::DivideEquals => self.parse_assign_op(func, symbol, Opcode::Divide.into())?,
+                    TokenKind::ModulusEquals => self.parse_assign_op(func, symbol, Opcode::Modulus.into())?,
                     _ => return Err(self.parse_error()),
                 }
             }
@@ -346,7 +364,7 @@ impl<'src> Parser<'src> {
         }
         Ok(())
     }
-    fn parse_block(&mut self, func: &mut FuncBuilder<'src, '_>) -> Result<(), ParseError<'src>> {
+    fn parse_block(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         let start_stack_size = func.stack_size();
         self.expect_token(TokenKind::OpenCurlyBrace)?;
         while !self.eat_token(TokenKind::CloseCurlyBrace) {
@@ -358,24 +376,17 @@ impl<'src> Parser<'src> {
         }
         Ok(())
     }
-    pub fn parse(source: &'src str, path: Option<&'src str>) -> Result<(Vec<Func<'src>>, Vec<&'src str>), ParseError<'src>> {
+    pub fn parse(source: &'a str, path: Option<&'a str>, funcs: &'a mut Vec<Func>, symbols: &'a mut Vec<String>, params: Vec<Symbol>) -> Result<Vec<Symbol>, ParseError<'a>> {
         let mut lexer = Lexer::new(source);
         let token = lexer.next_token();
-        let mut func = FuncBuilder::new();
-        let mut parser = Parser {
-            path,
-            source,
-            token,
-            lexer,
-            funcs: vec![],
-            func_count: 1,
-            props: vec![],
-        };
+        let mut func = FuncBuilder::new(source, params);
+        let mut parser = Parser { path, source, token, lexer, funcs, symbols };
         while parser.token.kind != TokenKind::End {
             parser.parse_stmt(&mut func)?;
         }
         func.push_bytes(&[Opcode::Finish.into()]);
+        let last_scope = func.scope.clone();
         parser.funcs.push(func.build());
-        Ok((parser.funcs, parser.props))
+        Ok(last_scope)
     }
 }

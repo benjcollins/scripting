@@ -7,50 +7,50 @@ use std::convert::TryInto;
 use crate::{heap::{Heap, HeapPtr}, opcode::Opcode, list::List, func::{Func, ClosureValue}};
 
 #[derive(Debug, Clone, Copy)]
-pub enum Value<'a> {
+pub enum Value {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Closure(HeapPtr<Closure<'a>>),
-    RustValue(HeapPtr<dyn RustValue<'a> + 'a>),
+    Closure(HeapPtr<Closure>),
+    RustValue(HeapPtr<dyn RustValue>),
     None,
 }
 
-pub trait RustValue<'a> where Self: fmt::Debug + fmt::Display {
-    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine<'a>) -> Value<'a>;
+pub trait RustValue where Self: fmt::Debug + fmt::Display {
+    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine) -> Value;
 }
 
 #[derive(Debug, Clone)]
-pub struct Closure<'a> {
-    func: &'a Func<'a>,
-    closure_values: Vec<HeapPtr<ClosureValueRef<'a>>>,
+pub struct Closure {
+    func_id: usize,
+    closure_values: Vec<HeapPtr<ClosureValueRef>>,
 }
 
 #[derive(Debug, Clone, Copy)]
-enum ClosureValueRef<'a> {
+enum ClosureValueRef {
     Stack(usize),
-    Heap(HeapPtr<Value<'a>>),
+    Heap(HeapPtr<Value>),
 }
 
 pub struct VirtualMachine<'a> {
-    funcs: &'a [Func<'a>],
-    call: Call<'a>,
-    stack: Vec<Value<'a>>,
-    call_stack: Vec<Call<'a>>,
+    funcs: &'a [Func],
+    call: Call,
+    stack: &'a mut Vec<Value>,
+    call_stack: Vec<Call>,
     heap: Heap,
     finished: bool,
-    closure_ref_map: HashMap<usize, Vec<HeapPtr<ClosureValueRef<'a>>>>,
-    pub props: &'a [&'a str],
+    closure_ref_map: HashMap<usize, Vec<HeapPtr<ClosureValueRef>>>,
+    pub symbols: &'a [String],
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Call<'a> {
+struct Call {
     pc: usize,
     frame: usize,
-    closure: HeapPtr<Closure<'a>>,
+    closure: HeapPtr<Closure>,
 }
 
-impl<'a> PartialEq for Value<'a> {
+impl PartialEq for Value {
     fn eq(&self, other: &Value) -> bool {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => a == b,
@@ -62,15 +62,16 @@ impl<'a> PartialEq for Value<'a> {
     }
 }
 
-impl<'a> Closure<'a> {
+impl Closure {
     fn new(
-        func: &'a Func<'a>,
-        closure: Option<&Closure<'a>>,
+        func_id: usize,
+        closure: Option<&Closure>,
         frame: usize,
         heap: &mut Heap,
-        closure_ref_map: &mut HashMap<usize, Vec<HeapPtr<ClosureValueRef<'a>>>>
-    ) -> Closure<'a> {
-        let closure_values = func.closure_scope.iter().map(|var| match var {
+        closure_ref_map: &mut HashMap<usize, Vec<HeapPtr<ClosureValueRef>>>,
+        funcs: &[Func],
+    ) -> Closure {
+        let closure_values = funcs[func_id].closure_scope.iter().map(|var| match var {
             ClosureValue::Outer(index) => {
                 closure.unwrap().closure_values[*index as usize]
             }
@@ -81,7 +82,7 @@ impl<'a> Closure<'a> {
                 closure_ref
             }
         }).collect();
-        Closure { func, closure_values }
+        Closure { func_id, closure_values }
     }
 }
 
@@ -107,7 +108,8 @@ impl<'a> VirtualMachine<'a> {
         self.stack.push(Value::Bool(f(ord)))
     }
     fn take_bytes(&mut self, n: usize) -> &[u8] {
-        let bytes = &self.call.closure.func.bytecode[self.call.pc..self.call.pc + n];
+        let func = &self.funcs[self.call.closure.func_id];
+        let bytes = &func.bytecode[self.call.pc..self.call.pc + n];
         self.call.pc += n;
         bytes
     }
@@ -183,11 +185,12 @@ impl<'a> VirtualMachine<'a> {
             Opcode::PushFunc => {
                 let func_id = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap());
                 let closure = Closure::new(
-                    &self.funcs[self.funcs.len() - func_id as usize],
+                    func_id as usize,
                     Some(&self.call.closure),
                     self.call.frame,
                     &mut self.heap,
-                    &mut self.closure_ref_map
+                    &mut self.closure_ref_map,
+                    self.funcs,
                 );
                 self.stack.push(Value::Closure(self.heap.alloc(closure)))
             }
@@ -211,7 +214,10 @@ impl<'a> VirtualMachine<'a> {
             Opcode::PopPropStore => {
                 todo!()
             }
-            Opcode::PopPrint => println!("{}", self.stack.pop().unwrap()),
+            Opcode::PopPrint => {
+                let val = self.stack.pop().unwrap();
+                println!("{}", val)
+            }
             Opcode::Jump => self.call.pc = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap()) as usize,
             Opcode::JumpIfNot => {
                 let pc = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap());
@@ -231,7 +237,7 @@ impl<'a> VirtualMachine<'a> {
             Opcode::Call => match self.stack.pop().unwrap() {
                 Value::Closure(closure) => {
                     let arg_count = self.take_bytes(1)[0];
-                    if arg_count != closure.func.param_count {
+                    if arg_count != self.funcs[closure.func_id].param_count {
                         panic!()
                     }
                     self.call_stack.push(self.call);
@@ -241,10 +247,10 @@ impl<'a> VirtualMachine<'a> {
                         closure,
                     };
                 }
-                _ => panic!(),
+                value => panic!("{}", value),
             }
             Opcode::Return => {
-                for _ in 0..self.call.closure.func.param_count {
+                for _ in 0..self.funcs[self.call.closure.func_id].param_count {
                     self.drop()
                 }
                 self.call = self.call_stack.pop().unwrap()
@@ -252,11 +258,11 @@ impl<'a> VirtualMachine<'a> {
             Opcode::Finish => self.finished = true,
         }
     }
-    pub fn run(funcs: &[Func], entry_func: &Func, props: &[&str]) {
+    pub fn run(funcs: &[Func], entry_func: usize, symbols: &[String], stack: &mut Vec<Value>) {
         let mut heap = Heap::new();
 
         let mut closure_ref_map = HashMap::new();
-        let closure = Closure::new(entry_func, None, 0, &mut heap, &mut closure_ref_map);
+        let closure = Closure::new(entry_func, None, 0, &mut heap, &mut closure_ref_map, funcs);
 
         let mut vm = VirtualMachine {
             funcs,
@@ -265,12 +271,12 @@ impl<'a> VirtualMachine<'a> {
                 closure: heap.alloc(closure),
                 pc: 0,
             },
-            stack: vec![],
+            stack,
             call_stack: vec![],
             closure_ref_map,
             finished: false,
             heap,
-            props,
+            symbols,
         };
 
         while !vm.finished {
@@ -279,16 +285,14 @@ impl<'a> VirtualMachine<'a> {
     }
 }
 
-impl<'a> fmt::Display for Value<'a> {
+impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(int) => write!(f, "{}", int),
             Value::Float(float) => write!(f, "{}", float),
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::None => write!(f, "none"),
-            Value::Closure(closure) => {
-                write!(f, "fn({})", closure.func.scope[1..closure.func.param_count as usize + 1].join(", "))
-            }
+            Value::Closure(_) => write!(f, "fn(...)"),
             Value::RustValue(value) => write!(f, "{}", &**value),
         }
     }

@@ -1,21 +1,21 @@
 use std::{cell::RefCell, mem::size_of, fmt::Display, convert::TryInto};
 
-use crate::opcode::Opcode;
+use crate::{opcode::Opcode, parser::Symbol};
 
 #[derive(Debug, Clone)]
 pub struct FuncBuilder<'src, 'outer> {
+    source: &'src str,
     bytecode: Vec<u8>,
     param_count: u8,
     closure_scope: RefCell<Vec<ClosureValue>>,
-    scope: Vec<&'src str>,
+    pub scope: Vec<Symbol>,
     outer: Option<&'outer FuncBuilder<'src, 'outer>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct Func<'src> {
+#[derive(Debug, Clone, Default)]
+pub struct Func {
     pub bytecode: Vec<u8>,
     pub param_count: u8,
-    pub scope: Vec<&'src str>,
     pub closure_scope: Vec<ClosureValue>,
 }
 
@@ -42,20 +42,22 @@ pub enum Variable {
 }
 
 impl<'src, 'outer> FuncBuilder<'src, 'outer> {
-    pub fn new() -> FuncBuilder<'src, 'outer> {
+    pub fn new(source: &'src str, params: Vec<Symbol>) -> FuncBuilder<'src, 'outer> {
         FuncBuilder {
+            source,
             bytecode: vec![],
-            param_count: 0,
-            scope: vec![],
+            param_count: params.len() as u8,
+            scope: params,
             closure_scope: RefCell::new(vec![]),
             outer: None,
         }
     }
     pub fn new_child(&self) -> FuncBuilder<'src, '_> {
         FuncBuilder {
+            source: self.source,
             bytecode: vec![],
             param_count: 0,
-            scope: vec!["return"],
+            scope: vec![Symbol(0)],
             closure_scope: RefCell::new(vec![]),
             outer: Some(self),
         }
@@ -63,15 +65,14 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
     pub fn push_bytes(&mut self, bytes: &[u8]) {
         self.bytecode.extend(bytes)
     }
-    pub fn resolve_stack_var(&self, name: &'src str) -> Option<u8> {
+    pub fn resolve_stack_var(&self, symbol: Symbol) -> Option<u8> {
         self.scope.iter()
-            .copied().enumerate().rev()
-            .find(|(_, var_name)| *var_name == name)
-            .map(|(i, _)| i as u8)
+            .position(|var_symbol| *var_symbol == symbol)
+            .map(|offset| offset as u8)
     }
-    pub fn resolve_closure_var(&self, name: &'src str) -> Option<u8> {
+    pub fn resolve_closure_var(&self, symbol: Symbol) -> Option<u8> {
         for i in 0..self.closure_scope.borrow().len() {
-            if self.closure_var_name(i as u8) == name {
+            if self.closure_var_symbol(i as u8) == symbol {
                 return Some(i as u8)
             }
         }
@@ -79,9 +80,9 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             Some(outer) => outer,
             None => return None,
         };
-        let closure_var = if let Some(index) = outer.resolve_stack_var(name) {
+        let closure_var = if let Some(index) = outer.resolve_stack_var(symbol) {
             ClosureValue::Stack(index)
-        } else if let Some(index) = outer.resolve_closure_var(name) {
+        } else if let Some(index) = outer.resolve_closure_var(symbol) {
             ClosureValue::Outer(index)
         } else {
             return None
@@ -90,17 +91,17 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
         self.closure_scope.borrow_mut().push(closure_var);
         Some(index as u8)
     }
-    pub fn closure_var_name(&self, index: u8) -> &'src str {
+    pub fn closure_var_symbol(&self, index: u8) -> Symbol {
         let outer = self.outer.unwrap();
         match self.closure_scope.borrow()[index as usize] {
             ClosureValue::Stack(index) => outer.scope[index as usize],
-            ClosureValue::Outer(index) => outer.closure_var_name(index),
+            ClosureValue::Outer(index) => outer.closure_var_symbol(index),
         }
     }
-    pub fn resolve_var(&mut self, name: &'src str) -> Option<Variable> {
-        if let Some(index) = self.resolve_stack_var(name) {
+    pub fn resolve_var(&mut self, symbol: Symbol) -> Option<Variable> {
+        if let Some(index) = self.resolve_stack_var(symbol) {
             Some(Variable::Stack(index))
-        } else if let Some(index) = self.resolve_closure_var(name) {
+        } else if let Some(index) = self.resolve_closure_var(symbol) {
             Some(Variable::Closure(index))
         } else {
             None
@@ -118,11 +119,11 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             Variable::Closure(index) => self.bytecode.extend([Opcode::PopClosureStore.into(), index]),
         }
     }
-    pub fn define_var(&mut self, name: &'src str) {
-        self.scope.push(name);
+    pub fn define_var(&mut self, symbol: Symbol) {
+        self.scope.push(symbol);
     }
-    pub fn define_param(&mut self, name: &'src str) {
-        self.define_var(name);
+    pub fn define_param(&mut self, symbol: Symbol) {
+        self.define_var(symbol);
         self.param_count += 1;
     }
     pub fn stack_size(&self) -> u8 {
@@ -150,11 +151,10 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
     pub fn connect_jump(&mut self, jump: Jump, target: &JumpTarget) {
         self.bytecode[jump.offset as usize..jump.offset as usize + size_of::<u32>()].copy_from_slice(&target.offset.to_be_bytes());
     }
-    pub fn build(self) -> Func<'src> {
+    pub fn build(self) -> Func {
         Func {
             bytecode: self.bytecode,
             param_count: self.param_count,
-            scope: self.scope,
             closure_scope: self.closure_scope.take(),
         }
     }
@@ -173,11 +173,23 @@ impl<'bytecode> Reader<'bytecode> {
     }
 }
 
-impl<'src> Display for Func<'src> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut reader = Reader { bytecode: &self.bytecode, offset: 0 };
+#[derive(Debug, Clone, Copy)]
+pub struct FuncSrc<'a> {
+    symbols: &'a [String],
+    func: &'a Func,
+}
 
-        while reader.offset < self.bytecode.len() {
+impl<'a> FuncSrc<'a> {
+    pub fn new(func: &'a Func, symbols: &'a [String]) -> FuncSrc<'a> {
+        FuncSrc { func, symbols }
+    }
+}
+
+impl<'a> Display for FuncSrc<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut reader = Reader { bytecode: &self.func.bytecode, offset: 0 };
+
+        while reader.offset < self.func.bytecode.len() {
             write!(f, "{:>5} : ", reader.offset)?;
             let opcode: Opcode = reader.take_bytes(1)[0].try_into().unwrap();
             write!(f, "{:?} ", opcode)?;
@@ -191,7 +203,7 @@ impl<'src> Display for Func<'src> {
                 Opcode::PushInt => writeln!(f, "{}", i64::from_be_bytes(reader.take_bytes(size_of::<i64>()).try_into().unwrap())),
                 Opcode::PushFloat => writeln!(f, "{}", f64::from_be_bytes(reader.take_bytes(size_of::<f64>()).try_into().unwrap())),
                 Opcode::PushLoad | Opcode::PopStore => {
-                    writeln!(f, "'{}'", self.scope[reader.take_bytes(1)[0] as usize])
+                    writeln!(f, "{}", reader.take_bytes(1)[0])
                 }
                 Opcode::PushClosureLoad | Opcode::PopClosureStore |
                 Opcode::PushPropLoad | Opcode::PopPropStore |
