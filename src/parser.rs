@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{lexer::Lexer, opcode::Opcode, token::{Token, TokenKind, pos_at_offset}, func::{Func, FuncBuilder}};
+use crate::{lexer::Lexer, opcode::Opcode, token::{Token, TokenKind, pos_at_offset}, func::{Func, FuncBuilder}, symbols::{Symbols, Symbol}};
 
 pub struct Parser<'a> {
     source: &'a str,
@@ -12,7 +12,7 @@ pub struct Parser<'a> {
 
 pub struct Program {
     pub funcs: Vec<Func>,
-    pub symbols: Vec<String>,
+    pub symbols: Symbols,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
@@ -52,12 +52,9 @@ impl<'src> fmt::Display for InvalidInput<'src> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Symbol(pub u32);
-
 impl Program {
     pub fn new() -> Program {
-        Program { funcs: vec![], symbols: vec!["return".to_string()] }
+        Program { funcs: vec![], symbols: Symbols::new() }
     }
 }
 
@@ -118,21 +115,11 @@ impl<'a> Parser<'a> {
         func.push_bytes(&[Opcode::Call.into(), arg_count]);
         Ok(())
     }
-    fn add_symbol(&mut self, name: &'a str) -> Symbol {
-        match self.program.symbols.iter().position(|symbol| *symbol == name) {
-            Some(id) => Symbol(id as u32),
-            None => {
-                let id = self.program.symbols.len();
-                self.program.symbols.push(name.to_string());
-                Symbol(id as u32)
-            }
-        }
-    }
     fn parse_value(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         match self.token.kind {
             TokenKind::Ident(name) => {
                 self.next_token();
-                let symbol = self.add_symbol(name);
+                let symbol = self.program.symbols.add(name);
                 match self.token.kind {
                     TokenKind::OpenBrace => {
                         self.parse_call(func, symbol)?;
@@ -200,7 +187,7 @@ impl<'a> Parser<'a> {
                 if !self.eat_token(TokenKind::CloseBrace) {
                     loop {
                         let name = self.expect_ident()?;
-                        let symbol = self.add_symbol(name);
+                        let symbol = self.program.symbols.add(name);
                         child_func.define_param(symbol);
                         if !self.eat_token(TokenKind::Comma) {
                             break
@@ -225,8 +212,8 @@ impl<'a> Parser<'a> {
     fn parse_property(&mut self, func: &mut FuncBuilder<'a, '_>) -> Result<(), ParseError<'a>> {
         self.next_token();
         let name = self.expect_ident()?;
-        let symbol = self.add_symbol(name);
-        func.push_bytes(&[Opcode::PushPropLoad.into(), symbol.0 as u8]);
+        let symbol = self.program.symbols.add(name);
+        func.push_bytes(&[Opcode::PushPropLoad.into(), symbol.id() as u8]);
         if self.eat_token(TokenKind::Dot) {
             self.parse_property(func)?;
         }
@@ -315,11 +302,11 @@ impl<'a> Parser<'a> {
             TokenKind::Var => {
                 self.next_token();
                 let name = self.expect_ident()?;
-                let symbol = self.add_symbol(name);
+                let symbol = self.program.symbols.add(name);
                 func.define_var(symbol);
                 self.expect_token(TokenKind::Equals)?;
                 if let TokenKind::Ident(name) = self.token.kind {
-                    let symbol = self.add_symbol(name);
+                    let symbol = self.program.symbols.add(name);
                     self.next_token();
                     if self.token.kind == TokenKind::OpenBrace {
                         self.parse_call(func, symbol)?;
@@ -345,7 +332,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Ident(name) => {
                 self.next_token();
-                let symbol = self.add_symbol(name);
+                let symbol = self.program.symbols.add(name);
                 match self.token.kind {
                     TokenKind::OpenBrace => {
                         self.parse_call(func, symbol)?;

@@ -7,7 +7,7 @@ use heap::Heap;
 use parser::Parser;
 use vm::VirtualMachine;
 
-use crate::{parser::{ParseError, Program, Symbol}, func::DispFunc, vm::Value};
+use crate::{parser::{ParseError, Program}, func::DispFunc, vm::Value};
 
 mod lexer;
 mod token;
@@ -17,13 +17,14 @@ mod vm;
 mod heap;
 mod list;
 mod func;
+mod symbols;
 
 fn _repl() {
     print!(">>> ");
     stdout().flush().unwrap();
     let mut source = String::new();
     let mut program = Program::new();
-    let mut last_scope = vec![Symbol(0)];
+    let mut last_scope = vec![symbols::RETURN];
     let mut stack = vec![Value::None];
     let mut heap = Heap::new();
     loop {
@@ -52,7 +53,7 @@ fn _repl() {
 fn _run_file(path: &str, disassemble: bool) {
     let source = fs::read_to_string(path).unwrap();
     let mut program = Program::new();
-    match Parser::parse(&source, Some(path), &mut program, vec![Symbol(0)]) {
+    match Parser::parse(&source, Some(path), &mut program, vec![symbols::RETURN]) {
         Ok(_) => (),
         Err(ParseError::EndOfInput) => {
             println!("unexpected end of input");
@@ -74,6 +75,6 @@ fn _run_file(path: &str, disassemble: bool) {
 }
 
 fn main() {
-    // _repl();
-    _run_file("example.txt", true)
+    _repl();
+    // _run_file("example.txt", true)
 }

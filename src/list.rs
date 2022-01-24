@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{heap::{HeapSlice, Heap}, vm::{Value, RustValue, VirtualMachine}};
+use crate::{heap::{HeapSlice, Heap}, vm::{Value, RustValue, VirtualMachine}, symbols::Symbol};
 
 #[derive(Debug, Clone)]
 pub struct List {
@@ -19,7 +19,7 @@ impl List {
 
 impl RustValue for List {
     fn get_property(&mut self, index: u8, vm: &mut VirtualMachine) -> Value {
-        match vm.program.symbols[index as usize].as_str() {
+        match vm.program.symbols.get_name(Symbol::from_index(index as u32)) {
             "len" => Value::Int(self.slice.len() as i64),
             _ => panic!()
         }
