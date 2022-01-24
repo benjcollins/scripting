@@ -46,7 +46,7 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
         FuncBuilder {
             source,
             bytecode: vec![],
-            param_count: params.len() as u8,
+            param_count: params.len() as u8 - 1,
             scope: params,
             closure_scope: Cell::new(vec![]),
             outer: None,
@@ -193,6 +193,9 @@ impl<'a> DispFunc<'a> {
 
 impl<'a> Display for DispFunc<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let params: Vec<_> = self.func.param_names.iter().map(|symbol| self.symbols[symbol.0 as usize].as_str()).collect();
+        writeln!(f, "func({})", params.join(", "))?;
+
         let mut reader = Reader { bytecode: &self.func.bytecode, offset: 0 };
 
         while reader.offset < self.func.bytecode.len() {
@@ -208,9 +211,7 @@ impl<'a> Display for DispFunc<'a> {
 
                 Opcode::PushInt => writeln!(f, "{}", i64::from_be_bytes(reader.take_bytes(size_of::<i64>()).try_into().unwrap())),
                 Opcode::PushFloat => writeln!(f, "{}", f64::from_be_bytes(reader.take_bytes(size_of::<f64>()).try_into().unwrap())),
-                Opcode::PushLoad | Opcode::PopStore => {
-                    writeln!(f, "{}", reader.take_bytes(1)[0])
-                }
+                Opcode::PushLoad | Opcode::PopStore => writeln!(f, "{}", reader.take_bytes(1)[0]),
                 Opcode::PushClosureLoad | Opcode::PopClosureStore |
                 Opcode::PushPropLoad | Opcode::PopPropStore |
                 Opcode::Drop | Opcode::Call => writeln!(f, "{}", reader.take_bytes(1)[0]),

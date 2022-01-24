@@ -302,7 +302,7 @@ impl<'a> fmt::Display for DispValue<'a> {
             Value::None => write!(f, "none"),
             Value::Closure(closure) => {
                 let params: Vec<_> = self.program.funcs[closure.func_id].param_names.iter().map(|symbol| self.program.symbols[symbol.0 as usize].as_str()).collect();
-                writeln!(f, "func({})", params.join(", "))
+                write!(f, "func({})", params.join(", "))
             },
             Value::RustValue(value) => write!(f, "{}", &*value),
         }

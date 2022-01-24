@@ -7,7 +7,7 @@ use heap::Heap;
 use parser::Parser;
 use vm::VirtualMachine;
 
-use crate::{parser::{ParseError, Program}, func::DispFunc};
+use crate::{parser::{ParseError, Program, Symbol}, func::DispFunc, vm::Value};
 
 mod lexer;
 mod token;
@@ -23,8 +23,8 @@ fn _repl() {
     stdout().flush().unwrap();
     let mut source = String::new();
     let mut program = Program::new();
-    let mut last_scope = vec![];
-    let mut stack = vec![];
+    let mut last_scope = vec![Symbol(0)];
+    let mut stack = vec![Value::None];
     let mut heap = Heap::new();
     loop {
         stdin().read_line(&mut source).unwrap();
@@ -52,7 +52,7 @@ fn _repl() {
 fn _run_file(path: &str, disassemble: bool) {
     let source = fs::read_to_string(path).unwrap();
     let mut program = Program::new();
-    match Parser::parse(&source, Some(path), &mut program, vec![]) {
+    match Parser::parse(&source, Some(path), &mut program, vec![Symbol(0)]) {
         Ok(_) => (),
         Err(ParseError::EndOfInput) => {
             println!("unexpected end of input");
@@ -64,12 +64,11 @@ fn _run_file(path: &str, disassemble: bool) {
         }
     };
     if disassemble {
-        for (i, func) in program.funcs.iter().enumerate() {
-            println!("func{} - {:?}", i, func.closure_scope);
+        for func in program.funcs.iter() {
             println!("{}", DispFunc::new(func, &program.symbols))
         }
     }
-    let mut stack = vec![];
+    let mut stack = vec![Value::None];
     let mut heap = Heap::new();
     VirtualMachine::run(&program, 0, &mut stack, &mut heap);
 }
