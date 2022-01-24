@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{heap::{HeapSlice, Heap}, vm::{Value, RustValue, VirtualMachine}, symbols::Symbol};
+use crate::{heap::{HeapSlice, Heap}, value::{Value, RustValue}, vm::VirtualMachine, symbols::Symbol};
 
 #[derive(Debug, Clone)]
 pub struct List {

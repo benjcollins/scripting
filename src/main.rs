@@ -7,7 +7,7 @@ use heap::Heap;
 use parser::Parser;
 use vm::VirtualMachine;
 
-use crate::{parser::{ParseError, Program}, func::DispFunc, vm::Value};
+use crate::{parser::{ParseError, Program}, func::DispFunc, value::Value};
 
 mod lexer;
 mod token;
@@ -18,6 +18,7 @@ mod heap;
 mod list;
 mod func;
 mod symbols;
+mod value;
 
 fn _repl() {
     print!(">>> ");

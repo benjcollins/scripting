@@ -1,48 +1,56 @@
-#[derive(Clone, Copy)]
-pub union CompactValue {
-    int: u64,
-    float: f64,
+use std::fmt;
+
+use crate::{heap::HeapPtr, parser::Program, vm::VirtualMachine};
+
+#[derive(Debug, Clone, Copy)]
+pub enum Value {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Closure(HeapPtr<Closure>),
+    RustValue(HeapPtr<dyn RustValue>),
+    None,
 }
 
-const TAG_MASK: u64 = 0x0000000000000003;
-const PTR_MASK: u64 = 0x0003fffffffffffc;
-const NAN_MASK: u64 = 0x7ffc000000000000;
-const BOOL_BIT: u64 = 0x0000000000000004;
-const SIGN_BIT: u64 = 0x8000000000000000;
-const SIGN_EXT: u64 = 0xffff000000000000;
+pub struct DispValue<'a> {
+    program: &'a Program,
+    value: Value,
+}
 
-const NONE_TAG: u64 = 0;
-const INT_TAG: u64 = 1;
-const BOOL_TAG: u64 = 2;
-const PTR_TAG: u64 = 3;
+pub trait RustValue where Self: fmt::Debug + fmt::Display {
+    fn get_property(&mut self, index: u8, vm: &mut VirtualMachine) -> Value;
+}
 
-impl CompactValue {
-    pub fn decode(&self) -> Value {
-        unsafe {
-            if self.float.is_nan() {
-                match self.int & TAG_MASK {
-                    NONE_TAG => Value::None,
-                    // PTR_TAG => Value::Ptr(self.int & PTR_MASK),
-                    BOOL_TAG => Value::Bool(BOOL_BIT & self.int != 0),
-                    INT_TAG => if SIGN_BIT & self.int == 0 {
-                        Value::Int((self.int >> 2 & !SIGN_EXT) as i64)
-                    } else {
-                        Value::Int((self.int >> 2 | SIGN_EXT) as i64)
-                    },
-                    _ => unreachable!(),
-                }
-            } else {
-                Value::Float(self.float)
-            }
-        }
+#[derive(Debug, Clone)]
+pub struct Closure {
+    pub func_id: usize,
+    pub closure_values: Vec<HeapPtr<ClosureValueRef>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ClosureValueRef {
+    Stack(usize),
+    Heap(HeapPtr<Value>),
+}
+
+impl<'a> DispValue<'a> {
+    pub fn new(value: Value, program: &'a Program) -> DispValue<'a> {
+        DispValue { program, value }
     }
-    pub fn encode(val: Value) -> CompactValue {
-        match val {
-            Value::Int(i) => CompactValue { int: NAN_MASK | ((i as u64) << 2) | INT_TAG | if i < 0 { SIGN_BIT } else { 0 } },
-            Value::Float(float) => CompactValue { float },
-            // Value::Ptr(p) => CompactValue { int: NAN_MASK | p | PTR_TAG },
-            Value::Bool(b) => CompactValue { int: NAN_MASK | if b { BOOL_BIT } else { 0 } | BOOL_TAG },
-            Value::None => CompactValue { int: NAN_MASK | NONE_TAG },
+}
+
+impl<'a> fmt::Display for DispValue<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.value {
+            Value::Int(int) => write!(f, "{}", int),
+            Value::Float(float) => write!(f, "{}", float),
+            Value::Bool(bool) => write!(f, "{}", bool),
+            Value::None => write!(f, "none"),
+            Value::Closure(closure) => {
+                let params: Vec<_> = self.program.funcs[closure.func_id].param_names.iter().map(|symbol| self.program.symbols.get_name(*symbol)).collect();
+                write!(f, "func({})", params.join(", "))
+            },
+            Value::RustValue(value) => write!(f, "{}", &*value),
         }
     }
 }
