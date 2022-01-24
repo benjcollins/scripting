@@ -1,13 +1,12 @@
-use std::{cell::RefCell, mem::size_of, fmt::Display, convert::TryInto, iter::FromIterator};
+use std::{cell::Cell, mem::size_of, fmt::Display, convert::TryInto, iter::FromIterator};
 
 use crate::{opcode::Opcode, parser::Symbol};
 
-#[derive(Debug, Clone)]
 pub struct FuncBuilder<'src, 'outer> {
     source: &'src str,
     bytecode: Vec<u8>,
     param_count: u8,
-    closure_scope: RefCell<Vec<ClosureValue>>,
+    closure_scope: Cell<Vec<ClosureValue>>,
     pub scope: Vec<Symbol>,
     outer: Option<&'outer FuncBuilder<'src, 'outer>>,
 }
@@ -49,7 +48,7 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             bytecode: vec![],
             param_count: params.len() as u8,
             scope: params,
-            closure_scope: RefCell::new(vec![]),
+            closure_scope: Cell::new(vec![]),
             outer: None,
         }
     }
@@ -59,7 +58,7 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             bytecode: vec![],
             param_count: 0,
             scope: vec![Symbol(0)],
-            closure_scope: RefCell::new(vec![]),
+            closure_scope: Cell::new(vec![]),
             outer: Some(self),
         }
     }
@@ -72,7 +71,8 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             .map(|offset| offset as u8)
     }
     pub fn resolve_closure_var(&self, symbol: Symbol) -> Option<u8> {
-        for i in 0..self.closure_scope.borrow().len() {
+        let mut closure_scope = self.closure_scope.take();
+        for i in 0..closure_scope.len() {
             if self.closure_var_symbol(i as u8) == symbol {
                 return Some(i as u8)
             }
@@ -88,16 +88,20 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
         } else {
             return None
         };
-        let index = self.closure_scope.borrow().len();
-        self.closure_scope.borrow_mut().push(closure_var);
+        let index = closure_scope.len();
+        closure_scope.push(closure_var);
+        self.closure_scope.set(closure_scope);
         Some(index as u8)
     }
     pub fn closure_var_symbol(&self, index: u8) -> Symbol {
         let outer = self.outer.unwrap();
-        match self.closure_scope.borrow()[index as usize] {
+        let closure_scope = self.closure_scope.take();
+        let symbol = match closure_scope[index as usize] {
             ClosureValue::Stack(index) => outer.scope[index as usize],
             ClosureValue::Outer(index) => outer.closure_var_symbol(index),
-        }
+        };
+        self.closure_scope.set(closure_scope);
+        symbol
     }
     pub fn resolve_var(&mut self, symbol: Symbol) -> Option<Variable> {
         if let Some(index) = self.resolve_stack_var(symbol) {
