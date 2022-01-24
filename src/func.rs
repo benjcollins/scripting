@@ -1,4 +1,4 @@
-use std::{cell::RefCell, mem::size_of, fmt::Display, convert::TryInto};
+use std::{cell::RefCell, mem::size_of, fmt::Display, convert::TryInto, iter::FromIterator};
 
 use crate::{opcode::Opcode, parser::Symbol};
 
@@ -17,6 +17,7 @@ pub struct Func {
     pub bytecode: Vec<u8>,
     pub param_count: u8,
     pub closure_scope: Vec<ClosureValue>,
+    pub param_names: Vec<Symbol>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -156,6 +157,7 @@ impl<'src, 'outer> FuncBuilder<'src, 'outer> {
             bytecode: self.bytecode,
             param_count: self.param_count,
             closure_scope: self.closure_scope.take(),
+            param_names: Vec::from_iter(self.scope[1..self.param_count as usize + 1].iter().copied()),
         }
     }
 }
@@ -174,18 +176,18 @@ impl<'bytecode> Reader<'bytecode> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct FuncSrc<'a> {
+pub struct DispFunc<'a> {
     symbols: &'a [String],
     func: &'a Func,
 }
 
-impl<'a> FuncSrc<'a> {
-    pub fn new(func: &'a Func, symbols: &'a [String]) -> FuncSrc<'a> {
-        FuncSrc { func, symbols }
+impl<'a> DispFunc<'a> {
+    pub fn new(func: &'a Func, symbols: &'a [String]) -> DispFunc<'a> {
+        DispFunc { func, symbols }
     }
 }
 
-impl<'a> Display for FuncSrc<'a> {
+impl<'a> Display for DispFunc<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut reader = Reader { bytecode: &self.func.bytecode, offset: 0 };
 

@@ -3,10 +3,11 @@
 
 use std::{fs, io::{stdin, stdout, Write}};
 
+use heap::Heap;
 use parser::Parser;
 use vm::VirtualMachine;
 
-use crate::{parser::ParseError, func::FuncSrc};
+use crate::{parser::{ParseError, Program}, func::DispFunc};
 
 mod lexer;
 mod token;
@@ -17,20 +18,20 @@ mod heap;
 mod list;
 mod func;
 
-fn repl() {
+fn _repl() {
     print!(">>> ");
     stdout().flush().unwrap();
     let mut source = String::new();
-    let mut funcs = vec![];
-    let mut symbols = vec![];
+    let mut program = Program::new();
     let mut last_scope = vec![];
     let mut stack = vec![];
+    let mut heap = Heap::new();
     loop {
         stdin().read_line(&mut source).unwrap();
-        let entry_func = funcs.len();
-        match Parser::parse(&source, None, &mut funcs, &mut symbols, last_scope.clone()) {
+        let entry_func = program.funcs.len();
+        match Parser::parse(&source, None, &mut program, last_scope.clone()) {
             Ok(final_scope) => {
-                VirtualMachine::run(&funcs, entry_func, &symbols, &mut stack);
+                VirtualMachine::run(&program, entry_func, &mut stack, &mut heap);
                 last_scope = final_scope;
                 source.clear();
                 print!(">>> ");
@@ -48,11 +49,10 @@ fn repl() {
     }
 }
 
-fn run_file(path: &str, disassemble: bool) {
+fn _run_file(path: &str, disassemble: bool) {
     let source = fs::read_to_string(path).unwrap();
-    let mut funcs = vec![];
-    let mut symbols = vec![];
-    match Parser::parse(&source, Some(path), &mut funcs, &mut symbols, vec![]) {
+    let mut program = Program::new();
+    match Parser::parse(&source, Some(path), &mut program, vec![]) {
         Ok(_) => (),
         Err(ParseError::EndOfInput) => {
             println!("unexpected end of input");
@@ -64,16 +64,17 @@ fn run_file(path: &str, disassemble: bool) {
         }
     };
     if disassemble {
-        for (i, func) in funcs.iter().enumerate() {
+        for (i, func) in program.funcs.iter().enumerate() {
             println!("func{} - {:?}", i, func.closure_scope);
-            println!("{}", FuncSrc::new(func, &symbols))
+            println!("{}", DispFunc::new(func, &program.symbols))
         }
     }
     let mut stack = vec![];
-    VirtualMachine::run(&funcs, funcs.len() - 1, &symbols, &mut stack);
+    let mut heap = Heap::new();
+    VirtualMachine::run(&program, 0, &mut stack, &mut heap);
 }
 
 fn main() {
-    repl();
-    // run_file("example.txt", true)
+    // _repl();
+    _run_file("example.txt", true)
 }

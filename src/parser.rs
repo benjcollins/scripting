@@ -7,13 +7,12 @@ pub struct Parser<'a> {
     path: Option<&'a str>,
     lexer: Lexer<'a>,
     token: Token<'a>,
-    funcs: &'a mut Vec<Func>,
-    symbols: &'a mut Vec<String>,
+    program: &'a mut Program,
 }
 
 pub struct Program {
-    funcs: Vec<Func>,
-    symbols: Vec<String>,
+    pub funcs: Vec<Func>,
+    pub symbols: Vec<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
@@ -55,6 +54,12 @@ impl<'src> fmt::Display for InvalidInput<'src> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Symbol(pub u32);
+
+impl Program {
+    pub fn new() -> Program {
+        Program { funcs: vec![], symbols: vec!["return".to_string()] }
+    }
+}
 
 impl<'a> Parser<'a> {
     fn next_token(&mut self) {
@@ -114,11 +119,11 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn add_symbol(&mut self, name: &'a str) -> Symbol {
-        match self.symbols.iter().position(|symbol| *symbol == name) {
+        match self.program.symbols.iter().position(|symbol| *symbol == name) {
             Some(id) => Symbol(id as u32),
             None => {
-                let id = self.symbols.len();
-                self.symbols.push(name.to_string());
+                let id = self.program.symbols.len();
+                self.program.symbols.push(name.to_string());
                 Symbol(id as u32)
             }
         }
@@ -184,8 +189,8 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Func => {
                 self.next_token();
-                let func_index = self.funcs.len();
-                self.funcs.push(Func::default());
+                let func_index = self.program.funcs.len();
+                self.program.funcs.push(Func::default());
                 func.push_bytes(&[Opcode::PushFunc.into()]);
                 func.push_bytes(&(func_index as u32).to_be_bytes());
 
@@ -211,7 +216,7 @@ impl<'a> Parser<'a> {
                     child_func.push_bytes(&[Opcode::PopStore.into(), 0]);
                 }
                 child_func.push_bytes(&[Opcode::Return.into()]);
-                self.funcs[func_index] = child_func.build();
+                self.program.funcs[func_index] = child_func.build();
             }
             _ => return Err(self.parse_error()),
         };
@@ -376,17 +381,19 @@ impl<'a> Parser<'a> {
         }
         Ok(())
     }
-    pub fn parse(source: &'a str, path: Option<&'a str>, funcs: &'a mut Vec<Func>, symbols: &'a mut Vec<String>, params: Vec<Symbol>) -> Result<Vec<Symbol>, ParseError<'a>> {
+    pub fn parse(source: &'a str, path: Option<&'a str>, program: &'a mut Program, params: Vec<Symbol>) -> Result<Vec<Symbol>, ParseError<'a>> {
         let mut lexer = Lexer::new(source);
         let token = lexer.next_token();
+        let func_index = program.funcs.len();
+        program.funcs.push(Func::default());
         let mut func = FuncBuilder::new(source, params);
-        let mut parser = Parser { path, source, token, lexer, funcs, symbols };
+        let mut parser = Parser { path, source, token, lexer, program };
         while parser.token.kind != TokenKind::End {
             parser.parse_stmt(&mut func)?;
         }
         func.push_bytes(&[Opcode::Finish.into()]);
         let last_scope = func.scope.clone();
-        parser.funcs.push(func.build());
+        parser.program.funcs[func_index] = func.build();
         Ok(last_scope)
     }
 }

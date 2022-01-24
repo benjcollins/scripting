@@ -1,9 +1,5 @@
-var fac = func(n) {
-    if n == 1 {
-        return 1
-    } else {
-        return n * fac(n - 1)
-    }
+var f = func(x, y, z) {
+    return x + y + z
 }
 
-print fac(6)
+print f

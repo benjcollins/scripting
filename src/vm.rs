@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt::Debug};
 use std::mem::size_of;
 use std::convert::TryInto;
 
+use crate::parser::Program;
 use crate::{heap::{Heap, HeapPtr}, opcode::Opcode, list::List, func::{Func, ClosureValue}};
 
 #[derive(Debug, Clone, Copy)]
@@ -33,14 +34,13 @@ enum ClosureValueRef {
 }
 
 pub struct VirtualMachine<'a> {
-    funcs: &'a [Func],
+    pub program: &'a Program,
     call: Call,
     stack: &'a mut Vec<Value>,
     call_stack: Vec<Call>,
-    heap: Heap,
+    heap: &'a mut Heap,
     finished: bool,
     closure_ref_map: HashMap<usize, Vec<HeapPtr<ClosureValueRef>>>,
-    pub symbols: &'a [String],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +93,7 @@ impl<'a> VirtualMachine<'a> {
             (Value::Int(a), Value::Float(b)) => Value::Float(float(b, a as f64)),
             (Value::Float(a), Value::Int(b)) => Value::Float(float(b as f64, a)),
             (Value::Float(a), Value::Float(b)) => Value::Float(float(b, a)),
-            (a, b) => panic!("invalid operands {} and {}", a, b),
+            (a, b) => panic!("invalid operands {} and {}", DispValue::new(a, self.program), DispValue::new(b, self.program)),
         };
         self.stack.push(c);
     }
@@ -108,7 +108,7 @@ impl<'a> VirtualMachine<'a> {
         self.stack.push(Value::Bool(f(ord)))
     }
     fn take_bytes(&mut self, n: usize) -> &[u8] {
-        let func = &self.funcs[self.call.closure.func_id];
+        let func = &self.program.funcs[self.call.closure.func_id];
         let bytes = &func.bytecode[self.call.pc..self.call.pc + n];
         self.call.pc += n;
         bytes
@@ -190,7 +190,7 @@ impl<'a> VirtualMachine<'a> {
                     self.call.frame,
                     &mut self.heap,
                     &mut self.closure_ref_map,
-                    self.funcs,
+                    &self.program.funcs,
                 );
                 self.stack.push(Value::Closure(self.heap.alloc(closure)))
             }
@@ -215,8 +215,8 @@ impl<'a> VirtualMachine<'a> {
                 todo!()
             }
             Opcode::PopPrint => {
-                let val = self.stack.pop().unwrap();
-                println!("{}", val)
+                let value = self.stack.pop().unwrap();
+                println!("{}", DispValue::new(value, self.program))
             }
             Opcode::Jump => self.call.pc = u32::from_be_bytes(self.take_bytes(size_of::<u32>()).try_into().unwrap()) as usize,
             Opcode::JumpIfNot => {
@@ -225,7 +225,7 @@ impl<'a> VirtualMachine<'a> {
                     Value::Bool(b) => if !b {
                         self.call.pc = pc as usize;
                     }
-                    val => panic!("{}", val)
+                    value => panic!("{}", DispValue::new(value, self.program))
                 }
             }
             Opcode::Drop => {
@@ -237,7 +237,7 @@ impl<'a> VirtualMachine<'a> {
             Opcode::Call => match self.stack.pop().unwrap() {
                 Value::Closure(closure) => {
                     let arg_count = self.take_bytes(1)[0];
-                    if arg_count != self.funcs[closure.func_id].param_count {
+                    if arg_count != self.program.funcs[closure.func_id].param_count {
                         panic!()
                     }
                     self.call_stack.push(self.call);
@@ -247,10 +247,10 @@ impl<'a> VirtualMachine<'a> {
                         closure,
                     };
                 }
-                value => panic!("{}", value),
+                value => panic!("{}", DispValue::new(value, self.program)),
             }
             Opcode::Return => {
-                for _ in 0..self.funcs[self.call.closure.func_id].param_count {
+                for _ in 0..self.program.funcs[self.call.closure.func_id].param_count {
                     self.drop()
                 }
                 self.call = self.call_stack.pop().unwrap()
@@ -258,14 +258,12 @@ impl<'a> VirtualMachine<'a> {
             Opcode::Finish => self.finished = true,
         }
     }
-    pub fn run(funcs: &[Func], entry_func: usize, symbols: &[String], stack: &mut Vec<Value>) {
-        let mut heap = Heap::new();
-
+    pub fn run(program: &Program, entry_func: usize, stack: &mut Vec<Value>, heap: &mut Heap) {
         let mut closure_ref_map = HashMap::new();
-        let closure = Closure::new(entry_func, None, 0, &mut heap, &mut closure_ref_map, funcs);
+        let closure = Closure::new(entry_func, None, 0, heap, &mut closure_ref_map, &program.funcs);
 
         let mut vm = VirtualMachine {
-            funcs,
+            program,
             call: Call {
                 frame: 0,
                 closure: heap.alloc(closure),
@@ -276,7 +274,6 @@ impl<'a> VirtualMachine<'a> {
             closure_ref_map,
             finished: false,
             heap,
-            symbols,
         };
 
         while !vm.finished {
@@ -285,15 +282,29 @@ impl<'a> VirtualMachine<'a> {
     }
 }
 
-impl fmt::Display for Value {
+pub struct DispValue<'a> {
+    program: &'a Program,
+    value: Value,
+}
+
+impl<'a> DispValue<'a> {
+    pub fn new(value: Value, program: &'a Program) -> DispValue<'a> {
+        DispValue { program, value }
+    }
+}
+
+impl<'a> fmt::Display for DispValue<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match self.value {
             Value::Int(int) => write!(f, "{}", int),
             Value::Float(float) => write!(f, "{}", float),
             Value::Bool(bool) => write!(f, "{}", bool),
             Value::None => write!(f, "none"),
-            Value::Closure(_) => write!(f, "fn(...)"),
-            Value::RustValue(value) => write!(f, "{}", &**value),
+            Value::Closure(closure) => {
+                let params: Vec<_> = self.program.funcs[closure.func_id].param_names.iter().map(|symbol| self.program.symbols[symbol.0 as usize].as_str()).collect();
+                writeln!(f, "func({})", params.join(", "))
+            },
+            Value::RustValue(value) => write!(f, "{}", &*value),
         }
     }
 }

@@ -19,7 +19,7 @@ impl List {
 
 impl RustValue for List {
     fn get_property(&mut self, index: u8, vm: &mut VirtualMachine) -> Value {
-        match vm.symbols[index as usize].as_str() {
+        match vm.program.symbols[index as usize].as_str() {
             "len" => Value::Int(self.slice.len() as i64),
             _ => panic!()
         }
